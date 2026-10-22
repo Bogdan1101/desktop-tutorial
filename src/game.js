@@ -1,15 +1,19 @@
 // Состояние матча и игровой цикл. Логика отделена от отрисовки,
 // поэтому матч можно прокручивать без экрана (для тестов).
 import {
-  TEAM, STRUCTURES, CREEP, HERO, MAP, FOUNTAIN, ITEMS, MAX_ITEMS, DIFFICULTY, side,
+  TEAM, STRUCTURES, CREEP, HERO, HEROES, MAP, FOUNTAIN, ITEMS, MAX_ITEMS, DIFFICULTY, MONSTERS, BUFFS, VISION, side,
 } from './config.js';
-import { Hero, Creep, Tower, Nexus, Burst, dist } from './units.js';
-import { clampToWalkable } from './world.js';
+import { Hero, Creep, Tower, Nexus, Monster, Burst, DeathAnim, dist } from './units.js';
+import { resolveTerrain, brushAt } from './nav.js';
+import { castAbility } from './abilities.js';
 import { HeroBrain } from './ai.js';
 
+const ROSTER = Object.keys(HEROES);
+
 export class Game {
-  constructor(scene, { difficulty = 'normal', autoplay = false } = {}) {
+  constructor(scene, { difficulty = 'normal', mode = '3v3', heroId = 'pyro', autoplay = false } = {}) {
     this.scene = scene;
+    this.mode = mode;
     this.diff = DIFFICULTY[difficulty] ?? DIFFICULTY.normal;
     this.units = [];
     this.projectiles = [];
@@ -20,31 +24,63 @@ export class Game {
     this.wave = 0;
     this.nextWave = CREEP.firstWave;
     this.kills = [0, 0];
+    this.dragonStacks = [0, 0];
     this.over = false;
     this.winner = null;
     this.shakeAmount = 0;
+    this.visionTimer = 0;
+    this.visible = [new Set(), new Set()];
 
     for (const team of [TEAM.BLUE, TEAM.RED]) {
       for (const st of STRUCTURES) {
-        const x = team === TEAM.BLUE ? st.x : -st.x; // st.x задан для синих
-        const u = st.kind === 'tower' ? new Tower(this, team, x, st.hp, st.order) : new Nexus(this, team, x, st.hp, st.order);
-        this.units.push(u);
+        const x = team === TEAM.BLUE ? st.x : -st.x;
+        this.units.push(st.kind === 'tower' ? new Tower(this, team, x, st.hp, st.order) : new Nexus(this, team, x, st.hp, st.order));
       }
     }
 
-    this.player = new Hero(this, TEAM.BLUE, -MAP.fountainX, 0, true);
-    this.enemy = new Hero(this, TEAM.RED, MAP.fountainX, 0, false);
-    this.enemy.damageMul = this.diff.damageMul;
-    this.units.push(this.player, this.enemy);
+    // Состав команд
+    const others = ROSTER.filter((h) => h !== heroId);
+    let blue, red;
+    if (mode === '1v1') {
+      blue = [heroId];
+      red = [others[Math.floor(Math.random() * others.length)]];
+    } else {
+      blue = [heroId, ...others];
+      red = [...ROSTER].sort(() => Math.random() - 0.5);
+    }
+    this.heroes = [[], []];
+    blue.forEach((id, i) => this.heroes[0].push(new Hero(this, TEAM.BLUE, id, i === 0, blue.length === 1 ? 1 : i)));
+    red.forEach((id, i) => this.heroes[1].push(new Hero(this, TEAM.RED, id, false, red.length === 1 ? 1 : i)));
+    this.player = this.heroes[0][0];
+    for (const h of this.heroes[1]) h.damageMul = this.diff.damageMul;
+    this.allHeroes = [...this.heroes[0], ...this.heroes[1]];
+    this.units.push(...this.allHeroes);
 
-    this.brains = [new HeroBrain(this, this.enemy, this.diff)];
-    if (autoplay) this.brains.push(new HeroBrain(this, this.player, DIFFICULTY.normal));
+    // Боты. В 3 на 3 один бот в команде ходит в лес (лучше всего танк)
+    this.brains = [];
+    for (const team of [0, 1]) {
+      const bots = this.heroes[team].filter((h) => !h.isPlayer || autoplay);
+      let jungler = null;
+      if (mode === '3v3') jungler = bots.find((h) => h.heroId === 'grok' && !h.isPlayer) ?? bots.find((h) => !h.isPlayer);
+      for (const h of bots) {
+        const diff = team === 1 ? this.diff : DIFFICULTY.normal;
+        this.brains.push(new HeroBrain(this, h, diff, h === jungler ? 'jungle' : 'lane'));
+      }
+    }
+
+    // Лагеря монстров
+    this.camps = [];
+    for (const kind of ['red', 'blue', 'dragon']) {
+      const m = MONSTERS[kind];
+      const spots = m.single ? [[m.x, m.z]] : [[m.x, m.z], [-m.x, -m.z]];
+      for (const [x, z] of spots) this.camps.push({ kind, x, z, timer: m.first, monster: null });
+    }
   }
 
   on(name, fn) { (this.listeners[name] ??= []).push(fn); }
   emit(name, data) { for (const fn of this.listeners[name] ?? []) fn(data); }
 
-  heroOf(team) { return team === TEAM.BLUE ? this.player : this.enemy; }
+  enemyHeroes(team) { return this.heroes[1 - team]; }
 
   nearestEnemy(unit, range, filter) {
     let best = null, bestD = Infinity;
@@ -57,12 +93,45 @@ export class Game {
     return best;
   }
 
-  // Здание неуязвимо, пока стоит предыдущее здание этой команды
   structureProtected(s) {
     return this.units.some((u) => u.alive && u.isStructure && u.team === s.team && u.order < s.order);
   }
 
-  // Нападение на героя под башней или рядом со своими крипами притягивает их агрессию
+  isVisible(team, unit) {
+    if (team === TEAM.NEUTRAL || unit.team === team) return true;
+    return this.visible[team].has(unit);
+  }
+
+  // Туман войны: что видит каждая команда. Из кустов видно наружу, но не внутрь.
+  computeVision() {
+    const brushOf = new Map();
+    for (const u of this.units) if (u.alive && !u.static) brushOf.set(u, brushAt(u.pos.x, u.pos.z));
+    for (const team of [TEAM.BLUE, TEAM.RED]) {
+      const set = this.visible[team];
+      set.clear();
+      const sources = [];
+      const ownBrushes = new Set();
+      for (const u of this.units) {
+        if (!u.alive || u.team !== team) continue;
+        const r = VISION[u.kind] ?? 8;
+        sources.push([u.pos.x, u.pos.z, r]);
+        const b = brushOf.get(u);
+        if (b !== undefined && b >= 0) ownBrushes.add(b);
+      }
+      sources.push([side(team) * MAP.fountainX, 0, MAP.baseRadius + 2]);
+      for (const u of this.units) {
+        if (!u.alive || u.team === team) continue;
+        if (u.static) { set.add(u); continue; } // здания видно всегда
+        const b = brushOf.get(u) ?? -1;
+        if (b >= 0 && !ownBrushes.has(b) && this.time > u.revealUntil) continue;
+        for (const [x, z, r] of sources) {
+          if (Math.hypot(u.pos.x - x, u.pos.z - z) <= r) { set.add(u); break; }
+        }
+      }
+    }
+    this.visionSources = null;
+  }
+
   onHeroHitHero(attacker, victim) {
     attacker.aggroTime = this.time;
     for (const u of this.units) {
@@ -72,31 +141,61 @@ export class Game {
     }
   }
 
+  shareXp(team, pos, amount) {
+    const near = this.heroes[team].filter((h) => h.alive && dist(h.pos, pos) < HERO.xpShareRange);
+    if (!near.length) return;
+    const each = near.length === 1 ? amount : (amount * 1.3) / near.length;
+    for (const h of near) h.gainXp(each);
+  }
+
   onDeath(unit, killer) {
-    const enemyTeam = 1 - unit.team;
-    const enemyHero = this.heroOf(enemyTeam);
-    const nearEnemyHero = enemyHero.alive && dist(enemyHero.pos, unit.pos) < 16;
+    const killerHero = killer && killer.kind === 'hero' ? killer : null;
     if (unit.kind === 'creep') {
-      if (killer === enemyHero) enemyHero.gainGold(unit.stats.gold);
-      if (nearEnemyHero) enemyHero.gainXp(unit.stats.xp);
-      this.burst(unit.pos.x, unit.pos.z, 0x888888, 0.9);
+      const enemyTeam = 1 - unit.team;
+      if (killerHero && killerHero.team === enemyTeam) { killerHero.gainGold(unit.stats.gold); killerHero.cs++; }
+      this.shareXp(enemyTeam, unit.pos, unit.stats.xp);
+      this.effects.push(new DeathAnim(this, unit, true));
+    } else if (unit.kind === 'monster') {
+      const def = unit.def;
+      if (killerHero) {
+        killerHero.gainGold(def.gold);
+        killerHero.cs += 4;
+        this.shareXp(killerHero.team, unit.pos, def.xp);
+        if (def.buff === 'dragon') {
+          this.dragonStacks[killerHero.team] = Math.min(4, this.dragonStacks[killerHero.team] + 1);
+          for (const h of this.heroes[killerHero.team]) if (h !== killerHero) h.gainGold(def.gold * 0.5);
+        } else {
+          killerHero.addBuff(def.buff, BUFFS[def.buff].duration);
+        }
+        this.emit('monster', { monster: unit, hero: killerHero });
+      }
+      const camp = this.camps.find((c) => c.monster === unit);
+      if (camp) { camp.monster = null; camp.timer = def.respawn; }
+      this.effects.push(new DeathAnim(this, unit, true));
     } else if (unit.kind === 'hero') {
+      const enemyTeam = 1 - unit.team;
       unit.deaths++;
       unit.respawnTimer = HERO.respawn(unit.level);
       unit.cancelRecall();
       unit.dash = null;
-      unit.model.group.visible = false;
+      unit.shield = 0;
       this.kills[enemyTeam]++;
-      if (killer === enemyHero || nearEnemyHero) {
-        enemyHero.kills++;
-        enemyHero.gainGold(HERO.killGold);
-        enemyHero.gainXp(HERO.killXp(unit.level));
+      // кто убил и кто помогал: все враги, бившие героя последние 10 секунд
+      const recent = [...unit.damagedBy.entries()].filter(([h, t]) => this.time - t < 10 && h.team === enemyTeam).map(([h]) => h);
+      const credit = killerHero && killerHero.team === enemyTeam ? killerHero : recent[recent.length - 1] ?? null;
+      if (credit) {
+        credit.kills++;
+        credit.gainGold(HERO.killGold);
+        const helpers = recent.filter((h) => h !== credit);
+        for (const h of helpers) { h.assists++; h.gainGold(HERO.assistGold / helpers.length); }
       }
-      this.burst(unit.pos.x, unit.pos.z, 0xffffff, 2);
-      this.emit('herokill', { victim: unit, killer });
+      this.shareXp(enemyTeam, unit.pos, HERO.killXp(unit.level));
+      unit.damagedBy.clear();
+      this.effects.push(new DeathAnim(this, unit, false));
+      this.emit('herokill', { victim: unit, killer: credit });
     } else if (unit.kind === 'tower') {
-      enemyHero.gainGold(150);
-      enemyHero.gainXp(120);
+      const enemyTeam = 1 - unit.team;
+      for (const h of this.heroes[enemyTeam]) { h.gainGold(150); h.gainXp(100); }
       this.burst(unit.pos.x, unit.pos.z, 0xffd27a, 4);
       this.shake(0.5);
       this.emit('structure', unit);
@@ -104,22 +203,64 @@ export class Game {
       this.burst(unit.pos.x, unit.pos.z, 0xffffff, 8);
       this.shake(1);
       this.over = true;
-      this.winner = enemyTeam;
-      this.emit('gameover', enemyTeam);
+      this.winner = 1 - unit.team;
+      this.emit('gameover', this.winner);
     }
   }
 
-  buy(hero, id) {
-    const item = ITEMS.find((i) => i.id === id);
-    if (!item || !hero.alive || !hero.inBase || hero.gold < item.cost) return false;
+  // --- Лавка --------------------------------------------------------------------
+  // Цена с учётом частей, которые уже есть у героя
+  priceOf(hero, id) {
+    const item = ITEMS[id];
+    let price = item.cost;
+    const consume = [];
+    const have = [...hero.items];
+    for (const part of item.from ?? []) {
+      const i = have.indexOf(part);
+      if (i >= 0) { consume.push(part); have.splice(i, 1); } else price += ITEMS[part].cost;
+    }
+    return { price, consume };
+  }
+
+  canBuy(hero, id) {
+    const item = ITEMS[id];
+    if (!item || !hero.alive || !hero.inBase) return false;
     if (item.unique && hero.items.includes(id)) return false;
-    if (hero.items.length >= MAX_ITEMS) return false;
-    hero.gold -= item.cost;
+    if (item.active && item.from && hero.activeItem && hero.activeItem !== id) return false;
+    const { price, consume } = this.priceOf(hero, id);
+    if (hero.gold < price) return false;
+    return hero.items.length - consume.length + 1 <= MAX_ITEMS;
+  }
+
+  buy(hero, id) {
+    if (!this.canBuy(hero, id)) return false;
+    const { price, consume } = this.priceOf(hero, id);
+    for (const part of consume) hero.items.splice(hero.items.indexOf(part), 1);
+    hero.gold -= price;
     hero.items.push(id);
-    item.apply(hero);
-    this.emit('bought', { hero, item });
+    hero.recomputeItems();
+    this.emit('bought', { hero, id });
     return true;
   }
+
+  // Следующая покупка по рекомендованной сборке: готовый предмет, если хватает, иначе его часть
+  nextBuildStep(hero) {
+    const want = {};
+    for (const id of hero.heroDef.build) {
+      want[id] = (want[id] ?? 0) + 1;
+      if (hero.items.filter((x) => x === id).length >= want[id]) continue;
+      const item = ITEMS[id];
+      const { price } = this.priceOf(hero, id);
+      if (!item.from) return { id, price };
+      const missing = item.from.filter((p, i, arr) => hero.items.filter((x) => x === p).length < arr.slice(0, i + 1).filter((x) => x === p).length);
+      if (hero.gold >= price || !missing.length) return { id, price };
+      const part = missing.sort((a, b) => ITEMS[a].cost - ITEMS[b].cost)[0];
+      return { id: part, price: ITEMS[part].cost };
+    }
+    return null;
+  }
+
+  castAbility(hero, id, rank, aim) { return castAbility(this, hero, id, rank, aim); }
 
   spawnWave() {
     for (const team of [TEAM.BLUE, TEAM.RED]) {
@@ -143,20 +284,28 @@ export class Game {
       this.spawnWave();
       this.nextWave += CREEP.waveInterval;
     }
-    for (const h of [this.player, this.enemy]) if (h.alive) h.gold += HERO.passiveGold * dt;
+    for (const c of this.camps) {
+      if (c.monster) continue;
+      c.timer -= dt;
+      if (c.timer <= 0) {
+        c.monster = new Monster(this, c.kind, c.x, c.z, this.time / 60);
+        this.units.push(c.monster);
+        if (c.kind === 'dragon') this.emit('dragonspawn', c.monster);
+      }
+    }
+    for (const h of this.allHeroes) if (h.alive) h.gold += HERO.passiveGold * dt;
+    this.visionTimer -= dt;
+    if (this.visionTimer <= 0) { this.visionTimer = 0.1; this.computeVision(); }
     for (const b of this.brains) b.update(dt);
-    for (const u of this.units) if (u.alive) u.update(dt);
-    // мёртвые герои тоже обновляются (таймер возрождения)
-    for (const h of [this.player, this.enemy]) if (!h.alive) h.update(dt);
+    for (const u of this.units) if (u.alive || u.kind === 'hero') u.update(dt);
     this.resolveCollisions(dt);
     this.fountains(dt);
     for (const p of this.projectiles) p.update(dt);
     this.updateFx(dt);
 
-    // убрать погибших крипов
     for (let i = this.units.length - 1; i >= 0; i--) {
       const u = this.units[i];
-      if (!u.alive && u.kind === 'creep') { u.removeMesh(); this.units.splice(i, 1); }
+      if (!u.alive && (u.kind === 'creep' || u.kind === 'monster')) this.units.splice(i, 1);
     }
   }
 
@@ -181,7 +330,6 @@ export class Game {
         const d = Math.sqrt(d2) || 0.01;
         const push = (min - d) / 2;
         const nx = d2 ? dx / d : 1, nz = d2 ? dz / d : 0;
-        // рывок не толкают
         const wa = a.dash ? 0 : b.dash ? 2 : 1;
         const wb = b.dash ? 0 : a.dash ? 2 : 1;
         a.pos.x -= nx * push * wa; a.pos.z -= nz * push * wa;
@@ -195,9 +343,8 @@ export class Game {
         const nx = d ? dx / d : 0, nz = d ? dz / d : 1;
         a.pos.x = s.pos.x + nx * min;
         a.pos.z = s.pos.z + nz * min;
-        // обходить здание сбоку, а не упираться в него
         if (a.moving && a.moveDir.x * nx + a.moveDir.z * nz < -0.6) {
-          // уходить в ту сторону, где уже стоим (или по чётности id, если ровно по центру)
+          // обходить здание с той стороны, где уже стоим
           const sgn = nz > 0.05 ? 1 : nz < -0.05 ? -1 : (a.id % 2 ? 1 : -1);
           let tx = -nz, tz = nx;
           if (tz * sgn < 0) { tx = -tx; tz = -tz; }
@@ -205,17 +352,17 @@ export class Game {
           a.pos.z += tz * a.speed * dt * 0.8;
         }
       }
-      clampToWalkable(a.pos);
+      resolveTerrain(a.pos, a.radius * 0.8);
     }
   }
 
   fountains(dt) {
-    for (const h of [this.player, this.enemy]) {
+    for (const h of this.allHeroes) {
       if (!h.alive) continue;
       const own = Math.hypot(h.pos.x - side(h.team) * MAP.fountainX, h.pos.z);
       const foe = Math.hypot(h.pos.x + side(h.team) * MAP.fountainX, h.pos.z);
       if (own < MAP.fountainRadius + 1) h.hp = Math.min(h.maxHp, h.hp + h.maxHp * FOUNTAIN.healPerSec * dt);
-      if (foe < MAP.fountainRadius + 3) h.takeDamage(FOUNTAIN.enemyDps * dt, null);
+      if (foe < MAP.fountainRadius + 3) h.takeDamage(FOUNTAIN.enemyDps * dt, 'true', null);
     }
   }
 
@@ -228,9 +375,15 @@ export class Game {
   trail(hero) { this.effects.push(new Burst(this, hero.pos.x, 1, hero.pos.z, 0x9fe8ff, 1.4, 0.3)); }
   shake(a) { this.shakeAmount = Math.max(this.shakeAmount, a); }
 
-  syncMeshes(dt) {
-    for (const u of this.units) if (u.alive || u.isStructure) u.syncMesh(dt);
-    for (const p of this.projectiles) p.sync();
+  syncMeshes() {
+    const p = this.player;
+    for (const u of this.units) {
+      if (!u.model) continue;
+      if (u.alive || u.isStructure) u.syncMesh();
+      // туман войны: врагов вне видимости не рисуем
+      if (u.alive && !u.static && u.team !== p.team) u.model.group.visible = this.isVisible(p.team, u);
+    }
+    for (const pr of this.projectiles) pr.sync();
     for (const e of this.effects) e.sync();
   }
 }

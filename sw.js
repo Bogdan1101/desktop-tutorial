@@ -1,9 +1,10 @@
 // Кэширует игру, чтобы она открывалась без интернета. При изменении файлов увеличьте VERSION.
-const VERSION = 'dota3-v2';
+const VERSION = 'dota3-v3';
 const FILES = [
   './', 'index.html', 'style.css', 'manifest.webmanifest', 'icons/icon.svg', 'icons/icon-192.png', 'icons/icon-512.png',
   'vendor/three.module.min.js', 'src/main.js', 'src/config.js', 'src/world.js', 'src/models.js', 'src/units.js',
-  'src/game.js', 'src/ai.js', 'src/hud.js', 'src/input.js',
+  'src/game.js', 'src/ai.js', 'src/hud.js', 'src/input.js', 'src/nav.js', 'src/abilities.js', 'src/audio.js',
+  'src/overlays.js', 'src/settings.js',
 ];
 
 self.addEventListener('install', (e) => {

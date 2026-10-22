@@ -32,39 +32,51 @@
 <canvas id="scene"></canvas>
 
 <div id="hud" hidden>
-  <div class="top">
-    <div class="me">
-      <div class="lvl" id="lvl">1</div>
-      <div class="me-bars">
-        <div class="bar hp"><i id="hpFill"></i><span id="hpText">640 / 640</span></div>
-        <div class="bar xp"><i id="xpFill"></i></div>
-        <div class="gold" id="gold">500</div>
-      </div>
-    </div>
-    <div class="score">
-      <span class="k blue" id="killsBlue">0</span>
-      <span class="clock" id="clock">0:00</span>
-      <span class="k red" id="killsRed">0</span>
-    </div>
-    <canvas id="minimap" width="240" height="72"></canvas>
-  </div>
-
+  <div id="vignette"></div>
   <div id="bars"></div>
   <div id="floaters"></div>
   <div id="banner" hidden></div>
 
+  <div class="top">
+    <div class="me">
+      <div class="portrait"><span id="portraitLetter">П</span><b id="lvl">1</b></div>
+      <div class="me-bars">
+        <div class="bar hp"><i id="hpFill"></i><span id="hpText">0 / 0</span></div>
+        <div class="bar xp"><i id="xpFill"></i></div>
+        <div class="me-row"><span class="gold" id="gold">500</span><span class="buffs" id="buffs"></span></div>
+      </div>
+    </div>
+    <div class="center-top">
+      <button class="mini-act score-btn" data-act="score" aria-label="Таблица счёта">
+        <span class="k blue" id="killsBlue">0</span><span class="clock" id="clock">0:00</span><span class="k red" id="killsRed">0</span>
+      </button>
+      <button class="mini-act pause-btn" data-act="pause" aria-label="Пауза"><span></span><span></span></button>
+    </div>
+    <canvas id="minimap" width="288" height="112"></canvas>
+  </div>
+
   <div id="joyZone"><div id="joyBase" hidden><div id="joyKnob"></div></div></div>
 
-  <div class="actions">
-    <button class="act attack" data-act="attack" aria-label="Атака"><span>Атака</span></button>
-    <button class="act ab" data-act="Q" id="abQ"><b>Q</b><small>Шар</small><i class="cd"></i><em></em></button>
-    <button class="act ab" data-act="W" id="abW"><b>W</b><small>Рывок</small><i class="cd"></i><em></em></button>
-    <button class="act ab" data-act="E" id="abE"><b>E</b><small>Щит</small><i class="cd"></i><em></em></button>
-    <button class="act ab ult" data-act="R" id="abR"><b>R</b><small>Метеор</small><i class="cd"></i><em></em></button>
+  <div class="actions" id="actions">
+    <button class="act attack" id="atkBtn" aria-label="Атака"><span>Атака</span></button>
+    <button class="act small" id="atkCreep" aria-label="Бить крипа">Крип</button>
+    <button class="act small" id="atkTower" aria-label="Бить башню">Башня</button>
+    <button class="act ab" id="abQ"><b>Q</b><small></small><i class="cd"></i><em></em><span class="pips"></span></button>
+    <button class="act ab" id="abW"><b>W</b><small></small><i class="cd"></i><em></em><span class="pips"></span></button>
+    <button class="act ab" id="abE"><b>E</b><small></small><i class="cd"></i><em></em><span class="pips"></span></button>
+    <button class="act ab ult" id="abR"><b>R</b><small></small><i class="cd"></i><em></em><span class="pips"></span></button>
+    <button class="rank" data-rank="Q" id="rankQ" hidden aria-label="Улучшить Q">+</button>
+    <button class="rank" data-rank="W" id="rankW" hidden aria-label="Улучшить W">+</button>
+    <button class="rank" data-rank="E" id="rankE" hidden aria-label="Улучшить E">+</button>
+    <button class="rank" data-rank="R" id="rankR" hidden aria-label="Улучшить R">+</button>
+    <button class="act item-act" id="activeBtn" data-act="active" hidden aria-label="Песочные часы"><b>Часы</b><i class="cd"></i><em></em></button>
   </div>
+  <div id="aimCancel" hidden>Отмена</div>
+
   <div class="utility">
     <button class="util" data-act="recall" id="recallBtn">Домой</button>
     <button class="util" data-act="shop" id="shopBtn">Лавка</button>
+    <button class="util quick" data-act="quickbuy" id="quickBtn" hidden></button>
   </div>
 
   <div id="death" hidden>
@@ -72,43 +84,87 @@
     <strong id="deathTimer">10</strong>
   </div>
 
-  <div id="shop" hidden>
-    <div class="shop-card">
+  <div id="shop" class="panel-wrap" hidden>
+    <div class="panel shop-card">
       <header><h2>Лавка</h2><span class="gold" id="shopGold">0</span><button class="close" id="shopClose" aria-label="Закрыть">×</button></header>
-      <p class="hint" id="shopHint">Покупать можно только на своей базе.</p>
-      <ul id="shopList"></ul>
+      <p class="hint" id="shopHint"></p>
+      <div class="slots" id="shopSlots"></div>
+      <h3>Рекомендуем</h3>
+      <ul class="items" id="shopBuild"></ul>
+      <h3>Части</h3>
+      <ul class="items" id="shopParts"></ul>
+      <h3>Предметы</h3>
+      <ul class="items" id="shopItems"></ul>
+    </div>
+  </div>
+
+  <div id="score" class="panel-wrap" hidden>
+    <div class="panel score-card">
+      <header><h2>Счёт</h2><button class="close" id="scoreClose" aria-label="Закрыть">×</button></header>
+      <div id="scoreBody" class="score-body"></div>
+    </div>
+  </div>
+</div>
+
+<div id="pause" class="screen" hidden>
+  <div class="menu-card">
+    <h2 class="screen-title" id="pauseTitle">Пауза</h2>
+    <div class="settings">
+      <label for="setSfx">Звуки <input type="range" id="setSfx" min="0" max="1" step="0.05"></label>
+      <label for="setMusic">Музыка <input type="range" id="setMusic" min="0" max="1" step="0.05"></label>
+      <label for="setButtons">Размер кнопок <input type="range" id="setButtons" min="0.8" max="1.3" step="0.05"></label>
+      <div class="seg" role="radiogroup" aria-label="Качество графики">
+        <span>Графика</span>
+        <label><input type="radio" name="quality" id="qLow" value="low"><span>Низкая</span></label>
+        <label><input type="radio" name="quality" id="qMedium" value="medium"><span>Средняя</span></label>
+        <label><input type="radio" name="quality" id="qHigh" value="high"><span>Высокая</span></label>
+      </div>
+    </div>
+    <div class="menu-buttons">
+      <button class="play" id="resumeBtn">Продолжить</button>
+      <button class="ghost" id="quitBtn">Выйти в меню</button>
     </div>
   </div>
 </div>
 
 <div id="menu" class="screen">
-  <div class="menu-card">
+  <div class="menu-card wide">
     <h1>Дота <span>3</span></h1>
-    <p class="tag">Одна линия. Две башни. Один нексус.</p>
-    <div class="diff" role="radiogroup" aria-label="Сложность бота">
+    <div class="seg" role="radiogroup" aria-label="Режим">
+      <label><input type="radio" name="mode" id="mode1" value="1v1"><span>1 на 1</span></label>
+      <label><input type="radio" name="mode" id="mode3" value="3v3"><span>3 на 3</span></label>
+    </div>
+    <div class="heroes" id="heroCards" role="radiogroup" aria-label="Герой"></div>
+    <div class="seg" role="radiogroup" aria-label="Сложность ботов">
       <label><input type="radio" name="diff" id="diffEasy" value="easy"><span>Легко</span></label>
-      <label><input type="radio" name="diff" id="diffNormal" value="normal" checked><span>Нормально</span></label>
+      <label><input type="radio" name="diff" id="diffNormal" value="normal"><span>Нормально</span></label>
       <label><input type="radio" name="diff" id="diffHard" value="hard"><span>Сложно</span></label>
     </div>
-    <button class="play" id="playBtn">Играть</button>
+    <div class="menu-buttons">
+      <button class="play" id="playBtn">Играть</button>
+      <button class="ghost" id="settingsBtn">Настройки</button>
+    </div>
     <details class="howto">
       <summary>Как играть</summary>
       <ul>
-        <li>Левая половина экрана — джойстик движения.</li>
-        <li>«Атака» бьёт ближайшего врага, удерживайте её.</li>
-        <li>Q — огненный шар, W — рывок, E — щит, R — метеор (с 3 уровня).</li>
-        <li>Добивайте крипов ради золота, покупайте предметы в «Лавке» на базе.</li>
-        <li>Разрушьте две башни и вражеский нексус.</li>
-        <li>На компьютере: WASD или стрелки, пробел — атака, 1–4 — умения, B — домой.</li>
+        <li>Левая половина экрана — джойстик.</li>
+        <li>«Атака» бьёт ближайшего врага, сначала героев. «Крип» добивает самого раненого крипа, «Башня» бьёт здание.</li>
+        <li>Умение: тап — по ближайшей цели, потянуть — прицелиться вручную, увести палец на «Отмена» — не применять.</li>
+        <li>На каждом уровне нажмите «+» над умением, чтобы его улучшить. Ульта открывается с 5 уровня.</li>
+        <li>Золото за добивание крипов и монстров. В лавке на базе части собираются в сильные предметы, кнопка внизу покупает следующий рекомендуемый.</li>
+        <li>В кустах вас не видно. Монстры в лесу дают усиления, дракон у реки — урон всей команде.</li>
+        <li>Цель — разрушить две вражеские башни и нексус.</li>
+        <li>На компьютере: WASD — ходить, пробел — атака, C — крип, V — башня, Q / F / E / R — умения, Ctrl + умение — улучшить, 5 — предмет, T — быстрая покупка, P — лавка, Tab — счёт, B — домой, Esc — пауза.</li>
       </ul>
     </details>
   </div>
 </div>
 
 <div id="end" class="screen" hidden>
-  <div class="menu-card">
+  <div class="menu-card wide">
     <h1 id="endTitle">Победа</h1>
     <p class="tag" id="endStats"></p>
+    <div class="score-body" id="endScore"></div>
     <button class="play" id="againBtn">Ещё раз</button>
   </div>
 </div>

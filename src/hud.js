@@ -1,9 +1,16 @@
-// Интерфейс поверх сцены: полоски здоровья, счёт, миникарта, умения, лавка, сообщения.
+// Интерфейс поверх сцены: полоски, цифры урона, кнопки умений, лавка, таблица счёта, миникарта.
 import * as THREE from 'three';
-import { ABILITIES, ITEMS, MAX_ITEMS, MAP, HERO, TEAM } from './config.js';
+import { ABILITIES, ITEMS, MAX_ITEMS, MAP, HERO, TEAM, WALLS, BUFFS, STAT_NAMES, TEAM_NAME } from './config.js';
 
 const $ = (id) => document.getElementById(id);
-const BAR_HEIGHT = { hero: 3.2, creep: 1.8, tower: 8, nexus: 6.6 };
+const fmtTime = (t) => `${Math.floor(t / 60)}:${String(Math.floor(t) % 60).padStart(2, '0')}`;
+
+export function itemStatsText(item) {
+  return Object.entries(item.stats).map(([k, v]) => {
+    const val = ['as', 'crit', 'lifesteal', 'cdr'].includes(k) ? `${Math.round(v * 100)}%` : v;
+    return `+${val} ${STAT_NAMES[k]}`;
+  }).join(', ');
+}
 
 export class Hud {
   constructor(game, camera) {
@@ -11,47 +18,95 @@ export class Hud {
     this.camera = camera;
     this.bars = new Map();
     this.floats = [];
+    this.dmgPool = [];
     this.v = new THREE.Vector3();
     this.mapTimer = 0;
     this.slowTimer = 0;
     this.bannerTimer = 0;
+    this.bannerQueue = [];
     this.mini = $('minimap').getContext('2d');
     this.shopOpen = false;
+    this.scoreOpen = false;
     this.el = {
-      lvl: $('lvl'), hpFill: $('hpFill'), hpText: $('hpText'), xpFill: $('xpFill'), gold: $('gold'),
+      lvl: $('lvl'), hpFill: $('hpFill'), hpText: $('hpText'), xpFill: $('xpFill'), gold: $('gold'), buffs: $('buffs'),
       killsBlue: $('killsBlue'), killsRed: $('killsRed'), clock: $('clock'), banner: $('banner'),
-      death: $('death'), deathTimer: $('deathTimer'), shop: $('shop'), shopList: $('shopList'),
-      shopGold: $('shopGold'), shopHint: $('shopHint'), shopBtn: $('shopBtn'), recallBtn: $('recallBtn'),
-      barsLayer: $('bars'), floatLayer: $('floaters'),
+      death: $('death'), deathTimer: $('deathTimer'), shop: $('shop'), shopGold: $('shopGold'), shopHint: $('shopHint'),
+      shopBtn: $('shopBtn'), recallBtn: $('recallBtn'), quickBtn: $('quickBtn'), activeBtn: $('activeBtn'),
+      barsLayer: $('bars'), floatLayer: $('floaters'), vignette: $('vignette'), score: $('score'), scoreBody: $('scoreBody'),
+      portrait: $('portraitLetter'),
     };
+    const p = game.player;
+    this.el.portrait.textContent = p.name[0];
     this.ab = {};
-    for (const k of 'QWER') this.ab[k] = { btn: $('ab' + k), cd: $('ab' + k).querySelector('.cd'), em: $('ab' + k).querySelector('em') };
+    for (const k of 'QWER') {
+      const btn = $('ab' + k);
+      const def = ABILITIES[p.abilityIds[k]];
+      btn.querySelector('small').textContent = def.short;
+      btn.setAttribute('aria-label', def.name);
+      this.ab[k] = {
+        btn, cd: btn.querySelector('.cd'), em: btn.querySelector('em'), pips: btn.querySelector('.pips'),
+        rank: document.querySelector(`[data-rank="${k}"]`), max: def.ult ? 3 : 4,
+      };
+    }
+
+    $('shopClose').onclick = () => this.toggleShop(false);
+    this.el.shop.onpointerdown = (e) => { if (e.target === this.el.shop) this.toggleShop(false); };
+    $('scoreClose').onclick = () => this.toggleScore(false);
+
+    game.on('float', ({ unit, text }) => { if (unit === game.player) this.addFloat(unit, text, 'gold'); });
+    game.on('damage', (e) => this.onDamage(e));
+    game.on('herokill', ({ victim, killer }) => {
+      const total = game.kills[0] + game.kills[1];
+      if (victim === p) this.banner(killer ? `Вас убил ${killer.name}` : 'Вы погибли', true);
+      else if (killer === p) this.banner(total === 1 ? 'Первая кровь' : `Вы убили: ${victim.name}`);
+      else if (victim.team === p.team) this.banner(`Погиб союзник: ${victim.name}`, true);
+      else this.banner(`${killer ? killer.name : 'Союзники'} убил ${victim.name}`);
+    });
+    game.on('structure', (t) => this.banner(t.team === p.team ? 'Наша башня пала' : 'Вражеская башня разрушена', t.team === p.team));
+    game.on('levelup', (h) => { if (h === p) this.banner(`Уровень ${h.level}`); });
+    game.on('monster', ({ monster, hero }) => {
+      const ours = hero.team === p.team;
+      if (monster.monsterKind === 'dragon') this.banner(ours ? 'Дракон наш: +8% к урону' : 'Враги забрали дракона', !ours);
+      else if (hero === p) this.banner(BUFFS[monster.monsterKind].name);
+    });
+    game.on('dragonspawn', () => this.banner('Дракон появился у реки'));
 
     this.buildShop();
-    $('shopClose').addEventListener('click', () => this.toggleShop(false));
-    this.el.shop.addEventListener('pointerdown', (e) => { if (e.target === this.el.shop) this.toggleShop(false); });
-
-    game.on('float', ({ unit, text }) => { if (unit === game.player) this.addFloat(unit, text); });
-    game.on('herokill', ({ victim }) => {
-      const total = game.kills[0] + game.kills[1];
-      if (victim === game.player) this.banner('Вы погибли', true);
-      else this.banner(total === 1 ? 'Первая кровь' : 'Враг повержен');
-    });
-    game.on('structure', (t) => this.banner(t.team === TEAM.BLUE ? 'Наша башня пала' : 'Башня разрушена', t.team === TEAM.BLUE));
-    game.on('levelup', (h) => { if (h === game.player) this.banner(`Уровень ${h.level}`); });
   }
 
+  // --- лавка ---
   buildShop() {
-    this.el.shopList.innerHTML = '';
-    this.shopButtons = ITEMS.map((item) => {
-      const li = document.createElement('li');
-      const b = document.createElement('button');
-      b.innerHTML = `<b>${item.name}</b><small>${item.desc}</small><span class="gold">${item.cost}</span><span class="own"></span>`;
-      b.addEventListener('click', () => { this.game.buy(this.game.player, item.id); this.updateShop(); });
-      li.append(b);
-      this.el.shopList.append(li);
-      return { item, b, own: b.querySelector('.own') };
-    });
+    const make = (listId, ids) => {
+      const list = $(listId);
+      list.innerHTML = '';
+      return ids.map((id) => {
+        const item = ITEMS[id];
+        const li = document.createElement('li');
+        const b = document.createElement('button');
+        const name = document.createElement('b');
+        name.textContent = item.name;
+        const stats = document.createElement('small');
+        stats.textContent = itemStatsText(item) + (item.desc ? `. ${item.desc}` : '');
+        const recipe = document.createElement('span');
+        recipe.className = 'recipe';
+        if (item.from) recipe.textContent = 'Из: ' + item.from.map((x) => ITEMS[x].name).join(' + ');
+        const price = document.createElement('span');
+        price.className = 'gold';
+        const own = document.createElement('span');
+        own.className = 'own';
+        b.append(name, stats, recipe, price, own);
+        b.addEventListener('click', () => { this.game.buy(this.game.player, id); this.updateShop(); });
+        li.append(b);
+        list.append(li);
+        return { id, b, price, own };
+      });
+    };
+    const all = Object.keys(ITEMS);
+    this.shopRows = [
+      ...make('shopBuild', [...new Set(this.game.player.heroDef.build)]),
+      ...make('shopParts', all.filter((id) => !ITEMS[id].from)),
+      ...make('shopItems', all.filter((id) => ITEMS[id].from)),
+    ];
   }
 
   toggleShop(open = !this.shopOpen) {
@@ -61,18 +116,42 @@ export class Hud {
   }
 
   updateShop() {
-    const p = this.game.player;
+    const g = this.game, p = g.player;
     this.el.shopGold.textContent = Math.floor(p.gold);
-    this.el.shopHint.textContent = !p.inBase ? 'Покупать можно только на своей базе. Нажмите «Домой».'
-      : p.items.length >= MAX_ITEMS ? `Все ${MAX_ITEMS} ячеек заняты.` : `Вы на базе. Ячеек занято: ${p.items.length} из ${MAX_ITEMS}.`;
-    for (const { item, b, own } of this.shopButtons) {
-      const count = p.items.filter((x) => x === item.id).length;
-      own.textContent = count ? (item.unique ? 'Куплено' : `Есть: ${count}`) : '';
-      b.disabled = !p.inBase || p.gold < item.cost || (item.unique && count > 0) || !p.alive || p.items.length >= MAX_ITEMS;
+    this.el.shopHint.textContent = !p.inBase ? 'Покупать можно только на базе. Нажмите «Домой».'
+      : `Ячеек занято: ${p.items.length} из ${MAX_ITEMS}. Части, которые уже есть, идут в зачёт цены.`;
+    for (const r of this.shopRows) {
+      const { price } = g.priceOf(p, r.id);
+      r.price.textContent = price;
+      const count = p.items.filter((x) => x === r.id).length;
+      r.own.textContent = count ? `есть ×${count}` : '';
+      r.b.disabled = !g.canBuy(p, r.id);
+      r.b.classList.toggle('poor', p.gold < price);
+    }
+    const slots = $('shopSlots');
+    slots.textContent = '';
+    for (let i = 0; i < MAX_ITEMS; i++) {
+      const s = document.createElement('span');
+      s.className = 'slot';
+      s.textContent = p.items[i] ? ITEMS[p.items[i]].name : '';
+      slots.append(s);
     }
   }
 
+  // --- таблица счёта ---
+  toggleScore(open = !this.scoreOpen) {
+    this.scoreOpen = open;
+    this.el.score.hidden = !open;
+    if (open) this.updateScore();
+  }
+
+  updateScore() {
+    this.el.scoreBody.replaceChildren(scoreTable(this.game));
+  }
+
+  // --- сообщения ---
   banner(text, bad = false) {
+    if (this.bannerTimer > 0.6) { if (this.bannerQueue.length < 3) this.bannerQueue.push([text, bad]); return; }
     const b = this.el.banner;
     b.textContent = text;
     b.classList.toggle('bad', bad);
@@ -80,15 +159,23 @@ export class Hud {
     b.style.animation = 'none';
     void b.offsetWidth;
     b.style.animation = '';
-    this.bannerTimer = 2.2;
+    this.bannerTimer = 2;
   }
 
-  addFloat(unit, text) {
+  addFloat(unit, text, cls, dx = 0) {
     const el = document.createElement('div');
-    el.className = 'float';
+    el.className = `float ${cls}`;
     el.textContent = text;
     this.el.floatLayer.append(el);
-    this.floats.push({ el, x: unit.pos.x, z: unit.pos.z, t: 0 });
+    this.floats.push({ el, x: unit.pos.x + dx, z: unit.pos.z, h: unit.barHeight + 0.4, t: 0, life: 0.9 });
+  }
+
+  onDamage({ target, source, amount, type, crit }) {
+    const p = this.game.player;
+    if (amount < 1 || (source !== p && target !== p)) return;
+    if (this.floats.length > 40) return;
+    const cls = target === p ? 'taken' : crit ? 'crit' : type === 'magic' ? 'magic' : type === 'true' ? 'true' : 'phys';
+    this.addFloat(target, crit ? `${Math.round(amount)}!` : String(Math.round(amount)), cls, (Math.random() - 0.5) * 1.2);
   }
 
   project(x, y, z) {
@@ -100,12 +187,22 @@ export class Hud {
   barFor(u) {
     let b = this.bars.get(u);
     if (!b) {
+      const p = this.game.player;
       const el = document.createElement('div');
-      const rel = u === this.game.player ? 'me' : u.team === this.game.player.team ? 'ally' : 'enemy';
-      el.className = `ubar ${rel} ${u.kind === 'hero' ? 'hero' : u.isStructure ? 'struct' : ''}`;
-      el.innerHTML = u.kind === 'hero' ? '<i></i><s></s><b></b>' : '<i></i>';
+      const rel = u === p ? 'me' : u.team === TEAM.NEUTRAL ? 'neutral' : u.team === p.team ? 'ally' : 'enemy';
+      el.className = `ubar ${rel} ${u.kind === 'hero' ? 'hero' : u.isStructure ? 'struct' : u.kind === 'monster' ? 'mon' : ''}`;
+      const fill = document.createElement('i');
+      el.append(fill);
+      let shield = null, lvl = null;
+      if (u.kind === 'hero') {
+        shield = document.createElement('s');
+        lvl = document.createElement('b');
+        const name = document.createElement('u');
+        name.textContent = u.name;
+        el.append(shield, lvl, name);
+      }
       this.el.barsLayer.append(el);
-      b = { el, fill: el.firstChild, shield: el.querySelector('s'), lvl: el.querySelector('b'), lastW: -1, lastLvl: 0 };
+      b = { el, fill, shield, lvl, lastW: -1, lastLvl: 0, shown: true };
       this.bars.set(u, b);
     }
     return b;
@@ -114,16 +211,16 @@ export class Hud {
   update(dt) {
     const g = this.game, p = g.player;
 
-    // полоски над юнитами
     for (const [u, b] of this.bars) {
-      if (!u.alive || !g.units.includes(u)) { b.el.remove(); this.bars.delete(u); }
+      if ((!u.alive && u.kind !== 'hero') || !g.units.includes(u)) { b.el.remove(); this.bars.delete(u); }
     }
     for (const u of g.units) {
-      if (!u.alive) continue;
       const b = this.barFor(u);
-      const s = this.project(u.pos.x, BAR_HEIGHT[u.kind], u.pos.z);
-      if (!s || s.x < -60 || s.x > innerWidth + 60 || s.y < -20 || s.y > innerHeight + 20) { b.el.style.display = 'none'; continue; }
-      b.el.style.display = '';
+      const visible = u.alive && g.isVisible(p.team, u);
+      const s = visible ? this.project(u.pos.x, u.barHeight, u.pos.z) : null;
+      const show = s && s.x > -60 && s.x < innerWidth + 60 && s.y > -20 && s.y < innerHeight + 20;
+      if (!show) { if (b.shown) { b.el.style.display = 'none'; b.shown = false; } continue; }
+      if (!b.shown) { b.el.style.display = ''; b.shown = true; }
       b.el.style.transform = `translate(${s.x | 0}px, ${s.y | 0}px)`;
       const w = Math.round(u.hp / u.maxHp * 100);
       if (w !== b.lastW) { b.fill.style.width = w + '%'; b.lastW = w; }
@@ -132,38 +229,55 @@ export class Hud {
       if (b.lvl && b.lastLvl !== u.level) { b.lvl.textContent = u.level; b.lastLvl = u.level; }
     }
 
-    // всплывающие цифры
     this.floats = this.floats.filter((f) => {
       f.t += dt;
-      const s = this.project(f.x, 3.6 + f.t * 2, f.z);
+      const s = this.project(f.x, f.h + f.t * 2.2, f.z);
       if (s) {
         f.el.style.transform = `translate(${s.x | 0}px, ${s.y | 0}px) translateX(-50%)`;
-        f.el.style.opacity = String(1 - f.t);
+        f.el.style.opacity = String(Math.min(1, 1.6 * (1 - f.t / f.life)));
       }
-      if (f.t >= 1) { f.el.remove(); return false; }
+      if (f.t >= f.life) { f.el.remove(); return false; }
       return true;
     });
 
     if (this.bannerTimer > 0) {
       this.bannerTimer -= dt;
-      if (this.bannerTimer <= 0) this.el.banner.hidden = true;
+      if (this.bannerTimer <= 0) {
+        this.el.banner.hidden = true;
+        const next = this.bannerQueue.shift();
+        if (next) this.banner(...next);
+      }
     }
 
     // кнопки умений
     for (const k of 'QWER') {
       const a = this.ab[k];
-      const locked = k === 'R' && p.level < ABILITIES.R.unlockLevel;
+      const rank = p.ranks[k];
       const cd = p.cd[k];
-      const max = ABILITIES[k].cooldown * (1 - p.cdr);
-      a.cd.style.setProperty('--p', locked ? '100%' : `${cd > 0 ? (cd / max) * 100 : 0}%`);
-      a.em.textContent = locked ? `${ABILITIES.R.unlockLevel} ур.` : cd > 0 ? Math.ceil(cd) : '';
-      a.em.style.fontSize = locked ? '11px' : '';
-      a.btn.classList.toggle('off', locked || cd > 0 || !p.alive);
+      const def = p.ability(k);
+      const max = rank ? def.cooldown[rank - 1] * (1 - p.cdr) : 1;
+      a.cd.style.setProperty('--p', rank === 0 ? '100%' : `${cd > 0 ? (cd / max) * 100 : 0}%`);
+      const label = rank === 0 ? (k === 'R' && p.level < HERO.ultLevels[0] ? `${HERO.ultLevels[0]} ур.` : '') : cd > 0 ? String(Math.ceil(cd)) : '';
+      if (a.em.textContent !== label) a.em.textContent = label;
+      a.btn.classList.toggle('off', rank === 0 || cd > 0 || !p.canAct);
+      const pips = '●'.repeat(rank) + '○'.repeat(a.max - rank);
+      if (a.pips.textContent !== pips) a.pips.textContent = pips;
+      a.rank.hidden = !p.alive || !p.canRankUp(k);
     }
+
+    // предмет с активным действием
+    const act = p.activeItem;
+    this.el.activeBtn.hidden = !act;
+    if (act) {
+      this.el.activeBtn.querySelector('.cd').style.setProperty('--p', `${(p.activeCd / ITEMS[act].active.cooldown) * 100}%`);
+      this.el.activeBtn.querySelector('em').textContent = p.activeCd > 0 ? Math.ceil(p.activeCd) : '';
+    }
+
+    this.el.vignette.style.opacity = p.alive && p.hp / p.maxHp < 0.3 ? String(0.9 - (p.hp / p.maxHp) * 2) : '0';
 
     this.slowTimer -= dt;
     if (this.slowTimer <= 0) {
-      this.slowTimer = 0.1;
+      this.slowTimer = 0.12;
       const e = this.el;
       e.lvl.textContent = p.level;
       e.hpFill.style.width = `${(p.hp / p.maxHp) * 100}%`;
@@ -172,14 +286,30 @@ export class Hud {
       e.gold.textContent = Math.floor(p.gold);
       e.killsBlue.textContent = g.kills[0];
       e.killsRed.textContent = g.kills[1];
-      const t = Math.floor(g.time);
-      e.clock.textContent = `${Math.floor(t / 60)}:${String(t % 60).padStart(2, '0')}`;
+      e.clock.textContent = fmtTime(g.time);
       e.death.hidden = p.alive || g.over;
       if (!p.alive) e.deathTimer.textContent = Math.ceil(p.respawnTimer);
       e.shopBtn.classList.toggle('on', p.inBase && p.alive);
       e.recallBtn.classList.toggle('on', !!p.recall);
       e.recallBtn.textContent = p.recall ? `Домой ${p.recall.t.toFixed(1)}` : 'Домой';
+      // быстрая покупка по рекомендованной сборке
+      const step = p.inBase && p.alive ? g.nextBuildStep(p) : null;
+      e.quickBtn.hidden = !step;
+      if (step) {
+        e.quickBtn.textContent = `${ITEMS[step.id].name} · ${step.price}`;
+        e.quickBtn.disabled = !g.canBuy(p, step.id);
+      }
+      // усиления
+      const chips = [];
+      for (const id of ['red', 'blue']) {
+        const b = p.buffs.get(id);
+        if (b) chips.push(`<span class="chip ${id}">${id === 'red' ? 'Багр.' : 'Лаз.'} ${Math.ceil(b.until - g.time)}</span>`);
+      }
+      if (g.dragonStacks[p.team]) chips.push(`<span class="chip dragon">Дракон ×${g.dragonStacks[p.team]}</span>`);
+      const html = chips.join('');
+      if (e.buffs.innerHTML !== html) e.buffs.innerHTML = html;
       if (this.shopOpen) this.updateShop();
+      if (this.scoreOpen) this.updateScore();
     }
 
     this.mapTimer -= dt;
@@ -187,34 +317,44 @@ export class Hud {
   }
 
   drawMinimap() {
-    const c = this.mini, W = 240, H = 72;
-    const sx = (x) => ((x + MAP.halfLength) / (MAP.halfLength * 2)) * (W - 8) + 4;
-    const sz = (z) => H / 2 + (z / 16) * (H / 2 - 4);
+    const c = this.mini, W = 288, H = 112;
+    const sx = (x) => (x + 72) * 2;
+    const sz = (z) => (z + 28) * 2;
+    const g = this.game, p = g.player;
     c.clearRect(0, 0, W, H);
-    c.fillStyle = 'rgba(139,122,88,0.55)';
-    c.fillRect(sx(-MAP.baseX), sz(-MAP.laneHalfWidth), sx(MAP.baseX) - sx(-MAP.baseX), sz(MAP.laneHalfWidth) - sz(-MAP.laneHalfWidth));
-    c.fillStyle = 'rgba(47,127,168,0.8)';
-    c.fillRect(sx(-3.5), 0, sx(3.5) - sx(-3.5), H);
-    for (const [x, col] of [[-MAP.baseX, 'rgba(61,139,255,0.35)'], [MAP.baseX, 'rgba(255,74,61,0.35)']]) {
+    c.fillStyle = 'rgba(52,82,47,0.9)';
+    c.fillRect(sx(-MAP.jungleHalfX), sz(-MAP.jungleHalfZ), MAP.jungleHalfX * 4, MAP.jungleHalfZ * 4);
+    c.fillStyle = 'rgba(139,122,88,0.95)';
+    c.fillRect(sx(-MAP.baseX), sz(-MAP.laneHalfWidth), MAP.baseX * 4, MAP.laneHalfWidth * 4);
+    c.fillStyle = 'rgba(47,127,168,0.9)';
+    c.fillRect(sx(-MAP.riverHalfWidth), sz(-MAP.jungleHalfZ), MAP.riverHalfWidth * 4, MAP.jungleHalfZ * 4);
+    c.fillStyle = 'rgba(20,40,24,0.95)';
+    for (const w of WALLS) c.fillRect(sx(w[0]), sz(w[1]), (w[2] - w[0]) * 2, (w[3] - w[1]) * 2);
+    for (const [x, col] of [[-MAP.baseX, 'rgba(61,139,255,0.45)'], [MAP.baseX, 'rgba(255,74,61,0.45)']]) {
       c.fillStyle = col;
-      c.beginPath(); c.ellipse(sx(x), H / 2, (MAP.baseRadius / (MAP.halfLength * 2)) * (W - 8), (MAP.baseRadius / 16) * (H / 2 - 4), 0, 0, 7); c.fill();
+      c.beginPath(); c.arc(sx(x), sz(0), MAP.baseRadius * 2, 0, 7); c.fill();
     }
-    const col = ['#58a6ff', '#ff5a4a'];
-    for (const u of this.game.units) {
-      if (!u.alive) continue;
+    const col = ['#58a6ff', '#ff5a4a', '#ffc24a'];
+    for (const u of g.units) {
+      if (!u.alive || u.kind === 'hero' || !g.isVisible(p.team, u)) continue;
       c.fillStyle = col[u.team];
       const x = sx(u.pos.x), y = sz(u.pos.z);
-      if (u.kind === 'creep') c.fillRect(x - 1.5, y - 1.5, 3, 3);
-      else if (u.kind === 'tower') { c.fillRect(x - 4, y - 4, 8, 8); c.strokeStyle = '#000'; c.strokeRect(x - 4, y - 4, 8, 8); }
-      else if (u.kind === 'nexus') { c.beginPath(); c.moveTo(x, y - 7); c.lineTo(x + 6, y); c.lineTo(x, y + 7); c.lineTo(x - 6, y); c.fill(); }
+      if (u.kind === 'creep') c.fillRect(x - 2, y - 2, 4, 4);
+      else if (u.kind === 'monster') { c.beginPath(); c.arc(x, y, u.monsterKind === 'dragon' ? 6 : 4, 0, 7); c.fill(); }
+      else if (u.kind === 'tower') { c.fillRect(x - 5, y - 5, 10, 10); c.strokeStyle = '#000'; c.lineWidth = 1; c.strokeRect(x - 5, y - 5, 10, 10); }
+      else if (u.kind === 'nexus') { c.beginPath(); c.moveTo(x, y - 9); c.lineTo(x + 7, y); c.lineTo(x, y + 9); c.lineTo(x - 7, y); c.fill(); }
     }
-    for (const h of [this.game.enemy, this.game.player]) {
-      if (!h.alive) continue;
+    for (const h of g.allHeroes) {
+      if (!h.alive || !g.isVisible(p.team, h)) continue;
       c.fillStyle = col[h.team];
-      c.strokeStyle = h === this.game.player ? '#e9b949' : '#fff';
+      c.strokeStyle = h === p ? '#6dff8a' : '#fff';
       c.lineWidth = 2;
-      c.beginPath(); c.arc(sx(h.pos.x), sz(h.pos.z), 5, 0, 7); c.fill(); c.stroke();
+      c.beginPath(); c.arc(sx(h.pos.x), sz(h.pos.z), 6, 0, 7); c.fill(); c.stroke();
     }
+    // рамка камеры
+    c.strokeStyle = 'rgba(255,255,255,0.5)';
+    c.lineWidth = 1;
+    c.strokeRect(sx(p.pos.x) - 36, sz(p.pos.z) - 22, 72, 44);
   }
 
   clear() {
@@ -224,5 +364,40 @@ export class Hud {
     this.floats = [];
     this.el.banner.hidden = true;
     this.toggleShop(false);
+    this.toggleScore(false);
   }
+}
+
+// Таблица счёта: обе команды, уровень, У/С/П, крипы, предметы
+export function scoreTable(game) {
+  const wrap = document.createDocumentFragment();
+  for (const team of [TEAM.BLUE, TEAM.RED]) {
+    const h3 = document.createElement('h3');
+    h3.className = team === TEAM.BLUE ? 'blue' : 'red';
+    h3.textContent = `${TEAM_NAME[team]} · ${game.kills[team]}`;
+    const table = document.createElement('table');
+    const head = document.createElement('tr');
+    for (const t of ['Герой', 'Ур.', 'У / С / П', 'Крипы', 'Предметы']) {
+      const th = document.createElement('th');
+      th.textContent = t;
+      head.append(th);
+    }
+    table.append(head);
+    for (const h of game.heroes[team]) {
+      const tr = document.createElement('tr');
+      if (h === game.player) tr.className = 'mine';
+      const cells = [
+        `${h.name} (${h.heroDef.role})`, h.level, `${h.kills} / ${h.deaths} / ${h.assists}`, h.cs,
+        h.items.map((id) => ITEMS[id].name).join(', ') || '—',
+      ];
+      for (const v of cells) {
+        const td = document.createElement('td');
+        td.textContent = v;
+        tr.append(td);
+      }
+      table.append(tr);
+    }
+    wrap.append(h3, table);
+  }
+  return wrap;
 }

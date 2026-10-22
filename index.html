@@ -1,0 +1,113 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
+<meta name="theme-color" content="#0d1216">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<title>Дота 3</title>
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="icon" href="icons/icon.svg" type="image/svg+xml">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Rubik:wght@400;500;700&family=Unbounded:wght@600;800&display=swap">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<!-- GAME:BEGIN -->
+<canvas id="scene"></canvas>
+
+<div id="hud" hidden>
+  <div class="top">
+    <div class="me">
+      <div class="lvl" id="lvl">1</div>
+      <div class="me-bars">
+        <div class="bar hp"><i id="hpFill"></i><span id="hpText">640 / 640</span></div>
+        <div class="bar xp"><i id="xpFill"></i></div>
+        <div class="gold" id="gold">500</div>
+      </div>
+    </div>
+    <div class="score">
+      <span class="k blue" id="killsBlue">0</span>
+      <span class="clock" id="clock">0:00</span>
+      <span class="k red" id="killsRed">0</span>
+    </div>
+    <canvas id="minimap" width="240" height="72"></canvas>
+  </div>
+
+  <div id="bars"></div>
+  <div id="floaters"></div>
+  <div id="banner" hidden></div>
+
+  <div id="joyZone"><div id="joyBase" hidden><div id="joyKnob"></div></div></div>
+
+  <div class="actions">
+    <button class="act attack" data-act="attack" aria-label="Атака"><span>Атака</span></button>
+    <button class="act ab" data-act="Q" id="abQ"><b>Q</b><small>Шар</small><i class="cd"></i><em></em></button>
+    <button class="act ab" data-act="W" id="abW"><b>W</b><small>Рывок</small><i class="cd"></i><em></em></button>
+    <button class="act ab" data-act="E" id="abE"><b>E</b><small>Щит</small><i class="cd"></i><em></em></button>
+    <button class="act ab ult" data-act="R" id="abR"><b>R</b><small>Метеор</small><i class="cd"></i><em></em></button>
+  </div>
+  <div class="utility">
+    <button class="util" data-act="recall" id="recallBtn">Домой</button>
+    <button class="util" data-act="shop" id="shopBtn">Лавка</button>
+  </div>
+
+  <div id="death" hidden>
+    <p>Вы погибли</p>
+    <strong id="deathTimer">10</strong>
+  </div>
+
+  <div id="shop" hidden>
+    <div class="shop-card">
+      <header><h2>Лавка</h2><span class="gold" id="shopGold">0</span><button class="close" id="shopClose" aria-label="Закрыть">×</button></header>
+      <p class="hint" id="shopHint">Покупать можно только на своей базе.</p>
+      <ul id="shopList"></ul>
+    </div>
+  </div>
+</div>
+
+<div id="menu" class="screen">
+  <div class="menu-card">
+    <h1>Дота <span>3</span></h1>
+    <p class="tag">Одна линия. Две башни. Один нексус.</p>
+    <div class="diff" role="radiogroup" aria-label="Сложность бота">
+      <label><input type="radio" name="diff" id="diffEasy" value="easy"><span>Легко</span></label>
+      <label><input type="radio" name="diff" id="diffNormal" value="normal" checked><span>Нормально</span></label>
+      <label><input type="radio" name="diff" id="diffHard" value="hard"><span>Сложно</span></label>
+    </div>
+    <button class="play" id="playBtn">Играть</button>
+    <details class="howto">
+      <summary>Как играть</summary>
+      <ul>
+        <li>Левая половина экрана — джойстик движения.</li>
+        <li>«Атака» бьёт ближайшего врага, удерживайте её.</li>
+        <li>Q — огненный шар, W — рывок, E — щит, R — метеор (с 3 уровня).</li>
+        <li>Добивайте крипов ради золота, покупайте предметы в «Лавке» на базе.</li>
+        <li>Разрушьте две башни и вражеский нексус.</li>
+        <li>На компьютере: WASD или стрелки, пробел — атака, 1–4 — умения, B — домой.</li>
+      </ul>
+    </details>
+  </div>
+</div>
+
+<div id="end" class="screen" hidden>
+  <div class="menu-card">
+    <h1 id="endTitle">Победа</h1>
+    <p class="tag" id="endStats"></p>
+    <button class="play" id="againBtn">Ещё раз</button>
+  </div>
+</div>
+
+<div id="rotate" class="screen">
+  <div class="phone"></div>
+  <p>Поверните телефон горизонтально</p>
+</div>
+<!-- GAME:END -->
+
+<script type="importmap">
+{ "imports": { "three": "./vendor/three.module.min.js" } }
+</script>
+<script type="module" src="src/main.js"></script>
+</body>
+</html>

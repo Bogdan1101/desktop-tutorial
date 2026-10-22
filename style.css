@@ -1,0 +1,189 @@
+/* Интерфейс поверх 3D-сцены. Одна тёмная тема: игра всегда ночью на поле боя.
+   Раскладка как в мобильных MOBA: слева джойстик, справа атака и умения, сверху счёт и карта. */
+:root {
+  --ink: #0d1216;
+  --panel: rgba(13, 18, 22, 0.78);
+  --panel-edge: rgba(233, 185, 73, 0.35);
+  --text: #eef1f4;
+  --muted: #9aa7b2;
+  --gold: #e9b949;
+  --blue: #3d8bff;
+  --red: #ff4a3d;
+  --hp: #4fd16b;
+  --xp: #a77bff;
+  --font-display: 'Unbounded', 'Arial Black', system-ui, sans-serif;
+  --font-body: 'Rubik', system-ui, -apple-system, 'Segoe UI', sans-serif;
+  --sl: env(safe-area-inset-left, 0px);
+  --sr: env(safe-area-inset-right, 0px);
+  --st: env(safe-area-inset-top, 0px);
+  --sb: env(safe-area-inset-bottom, 0px);
+  color-scheme: dark;
+}
+
+* { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+[hidden] { display: none !important; }
+html, body { height: 100%; margin: 0; overflow: hidden; background: var(--ink); color: var(--text); }
+body { font: 14px/1.35 var(--font-body); user-select: none; -webkit-user-select: none; touch-action: none; }
+button { font: inherit; color: inherit; }
+button:focus-visible { outline: 2px solid var(--gold); outline-offset: 2px; }
+
+#scene { position: fixed; inset: 0; width: 100%; height: 100%; display: block; }
+
+#hud { position: fixed; inset: 0; pointer-events: none; }
+
+/* --- верхняя панель --- */
+.top {
+  position: absolute; top: calc(8px + var(--st)); left: calc(10px + var(--sl)); right: calc(10px + var(--sr));
+  display: flex; align-items: flex-start; justify-content: space-between; gap: 10px;
+}
+.me { display: flex; gap: 8px; align-items: center; background: var(--panel); padding: 6px 10px 6px 6px; border-radius: 12px; border: 1px solid var(--panel-edge); }
+.lvl {
+  width: 38px; height: 38px; border-radius: 50%; display: grid; place-items: center;
+  font: 800 16px var(--font-display); background: radial-gradient(circle at 35% 30%, #5ea3ff, #1d4fa8);
+  border: 2px solid var(--gold);
+}
+.me-bars { display: grid; gap: 3px; width: 150px; }
+.bar { position: relative; height: 12px; border-radius: 3px; background: rgba(255, 255, 255, 0.1); overflow: hidden; }
+.bar i { position: absolute; inset: 0 auto 0 0; width: 100%; background: var(--hp); transition: width 0.12s; }
+.bar.xp { height: 4px; }
+.bar.xp i { background: var(--xp); width: 0; }
+.bar span { position: relative; display: block; text-align: center; font-size: 9px; line-height: 12px; font-weight: 700; font-variant-numeric: tabular-nums; text-shadow: 0 1px 1px #000; }
+.gold { color: var(--gold); font-weight: 700; font-size: 13px; font-variant-numeric: tabular-nums; }
+.gold::before { content: ''; display: inline-block; width: 9px; height: 9px; border-radius: 50%; background: var(--gold); margin-right: 5px; box-shadow: inset -2px -2px 0 rgba(0, 0, 0, 0.25); }
+
+.score {
+  display: flex; align-items: center; gap: 10px; background: var(--panel); padding: 5px 14px; border-radius: 10px;
+  border: 1px solid var(--panel-edge); font-variant-numeric: tabular-nums;
+}
+.score .k { font: 800 18px var(--font-display); }
+.score .blue { color: var(--blue); }
+.score .red { color: var(--red); }
+.clock { color: var(--muted); font-weight: 500; min-width: 38px; text-align: center; }
+
+#minimap { width: 200px; height: 60px; border-radius: 8px; border: 1px solid var(--panel-edge); background: var(--panel); }
+
+/* --- полоски здоровья над юнитами --- */
+#bars, #floaters { position: absolute; inset: 0; overflow: hidden; }
+.ubar { position: absolute; left: 0; top: 0; height: 5px; width: 34px; margin-left: -17px; background: rgba(0, 0, 0, 0.65); border-radius: 2px; will-change: transform; }
+.ubar i { position: absolute; left: 0; top: 0; bottom: 0; width: 100%; border-radius: 2px; }
+.ubar.ally i { background: #58a6ff; }
+.ubar.enemy i { background: #ff5a4a; }
+.ubar.me i { background: var(--hp); }
+.ubar.hero { width: 64px; margin-left: -32px; height: 8px; border: 1px solid rgba(0, 0, 0, 0.8); }
+.ubar.hero b { position: absolute; left: -18px; top: -5px; width: 16px; height: 16px; border-radius: 50%; background: #111a; font: 700 10px/16px var(--font-body); text-align: center; color: var(--gold); }
+.ubar.hero s { position: absolute; left: 0; top: 0; height: 100%; background: rgba(200, 240, 255, 0.85); border-radius: 2px; }
+.ubar.struct { width: 70px; margin-left: -35px; height: 7px; }
+.ubar.locked i { opacity: 0.45; }
+.float { position: absolute; left: 0; top: 0; font: 800 13px var(--font-display); color: var(--gold); text-shadow: 0 1px 2px #000; will-change: transform, opacity; white-space: nowrap; }
+
+#banner {
+  position: absolute; top: 24%; left: 50%; transform: translateX(-50%);
+  font: 800 clamp(18px, 4vw, 30px) var(--font-display); letter-spacing: 0.04em; text-transform: uppercase;
+  color: var(--gold); text-shadow: 0 2px 10px #000, 0 0 2px #000; white-space: nowrap; animation: pop 0.25s ease-out;
+}
+#banner.bad { color: var(--red); }
+@keyframes pop { from { transform: translateX(-50%) scale(1.4); opacity: 0; } }
+
+/* --- джойстик --- */
+#joyZone { position: absolute; left: 0; bottom: 0; width: 48%; height: 72%; pointer-events: auto; touch-action: none; }
+#joyBase {
+  position: absolute; width: 120px; height: 120px; margin: -60px 0 0 -60px; border-radius: 50%;
+  background: rgba(255, 255, 255, 0.08); border: 2px solid rgba(255, 255, 255, 0.25);
+}
+#joyKnob {
+  position: absolute; left: 50%; top: 50%; width: 52px; height: 52px; margin: -26px 0 0 -26px; border-radius: 50%;
+  background: rgba(255, 255, 255, 0.35); border: 2px solid rgba(255, 255, 255, 0.6);
+}
+
+/* --- кнопки действий --- */
+.actions { position: absolute; right: calc(18px + var(--sr)); bottom: calc(16px + var(--sb)); width: 250px; height: 240px; }
+.act {
+  position: absolute; pointer-events: auto; touch-action: none; border-radius: 50%;
+  border: 2px solid rgba(233, 185, 73, 0.7); background: radial-gradient(circle at 40% 35%, #2b3640, #12181d);
+  display: grid; place-items: center; padding: 0; overflow: hidden; box-shadow: 0 3px 10px rgba(0, 0, 0, 0.5);
+}
+.act:active, .act.held { filter: brightness(1.35); transform: scale(0.95); }
+.attack { right: 0; bottom: 0; width: 92px; height: 92px; border-width: 3px; background: radial-gradient(circle at 40% 35%, #7b3a24, #2c130b); }
+.attack span { font: 800 13px var(--font-display); text-transform: uppercase; letter-spacing: 0.05em; }
+.ab { width: 60px; height: 60px; }
+.ab b { font: 800 18px var(--font-display); line-height: 1; margin-top: 6px; }
+.ab small { font-size: 9px; color: var(--muted); margin-top: -10px; }
+.ab .cd { position: absolute; inset: 0; border-radius: 50%; background: conic-gradient(rgba(0, 0, 0, 0.72) var(--p, 0%), transparent 0); }
+.ab em { position: absolute; font: 800 17px var(--font-display); font-style: normal; text-shadow: 0 1px 3px #000; }
+.ab.off { border-color: rgba(255, 255, 255, 0.2); }
+#abQ { right: 106px; bottom: 6px; }
+#abW { right: 96px; bottom: 82px; }
+#abE { right: 22px; bottom: 112px; }
+#abR { right: 160px; bottom: 132px; width: 56px; height: 56px; border-color: #ff7a3d; }
+
+.utility { position: absolute; left: 50%; bottom: calc(10px + var(--sb)); transform: translateX(-50%); display: flex; gap: 8px; }
+.util {
+  pointer-events: auto; touch-action: none; border: 1px solid var(--panel-edge); background: var(--panel);
+  padding: 7px 14px; border-radius: 9px; font-weight: 700; font-size: 13px;
+}
+.util:disabled { opacity: 0.4; }
+.util.on { border-color: var(--gold); color: var(--gold); }
+
+/* --- смерть и лавка --- */
+#death { position: absolute; inset: 0; display: grid; place-content: center; text-align: center; background: rgba(40, 0, 0, 0.35); }
+#death p { margin: 0; font: 800 22px var(--font-display); text-transform: uppercase; color: var(--red); text-shadow: 0 2px 6px #000; }
+#death strong { font: 800 48px var(--font-display); text-shadow: 0 2px 8px #000; }
+
+#shop { position: absolute; inset: 0; display: grid; place-items: center; background: rgba(0, 0, 0, 0.45); pointer-events: auto; padding: 12px; }
+.shop-card { width: min(520px, 100%); max-height: 100%; overflow: auto; background: #141b21; border: 1px solid var(--panel-edge); border-radius: 14px; padding: 14px 16px; }
+.shop-card header { display: flex; align-items: center; gap: 12px; }
+.shop-card h2 { margin: 0; font: 800 18px var(--font-display); flex: 1; }
+.close { background: none; border: 0; font-size: 26px; line-height: 1; padding: 0 6px; cursor: pointer; }
+.hint { margin: 4px 0 10px; color: var(--muted); font-size: 12px; }
+#shopList { list-style: none; margin: 0; padding: 0; display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 8px; }
+#shopList button {
+  width: 100%; text-align: left; display: grid; gap: 2px; padding: 9px 10px; border-radius: 10px;
+  background: #1d262e; border: 1px solid rgba(255, 255, 255, 0.08); cursor: pointer;
+}
+#shopList button:disabled { opacity: 0.45; cursor: default; }
+#shopList b { font-size: 14px; }
+#shopList small { color: var(--muted); }
+#shopList .gold { font-size: 12px; }
+#shopList .own { color: var(--hp); font-size: 11px; }
+
+/* --- экраны меню --- */
+.screen {
+  position: fixed; inset: 0; display: grid; place-items: center; padding: 16px max(16px, var(--sl)) 16px max(16px, var(--sr));
+  background: radial-gradient(ellipse at 30% 20%, rgba(61, 139, 255, 0.25), transparent 60%),
+              radial-gradient(ellipse at 75% 85%, rgba(255, 74, 61, 0.22), transparent 60%), rgba(9, 13, 16, 0.86);
+  overflow: auto;
+}
+.menu-card { text-align: center; max-width: 440px; width: 100%; }
+.menu-card h1 {
+  margin: 0; font: 800 clamp(40px, 9vw, 72px)/1 var(--font-display); letter-spacing: -0.02em; text-wrap: balance;
+  background: linear-gradient(180deg, #fff3cf, var(--gold) 55%, #9c6a12); -webkit-background-clip: text; background-clip: text; color: transparent;
+}
+.menu-card h1 span { background: linear-gradient(180deg, #ffd0c8, var(--red)); -webkit-background-clip: text; background-clip: text; }
+.tag { color: var(--muted); margin: 8px 0 18px; }
+.diff { display: flex; justify-content: center; gap: 6px; margin-bottom: 16px; flex-wrap: wrap; }
+.diff input { position: absolute; opacity: 0; pointer-events: none; }
+.diff span { display: block; padding: 8px 14px; border-radius: 9px; border: 1px solid rgba(255, 255, 255, 0.15); cursor: pointer; }
+.diff input:checked + span { border-color: var(--gold); color: var(--gold); background: rgba(233, 185, 73, 0.1); }
+.diff input:focus-visible + span { outline: 2px solid var(--gold); }
+.play {
+  font: 800 18px var(--font-display); text-transform: uppercase; letter-spacing: 0.06em; padding: 14px 44px; border-radius: 12px; cursor: pointer;
+  border: 2px solid #ffd77a; background: linear-gradient(180deg, #d9a33a, #8f5d10); color: #1a1004; box-shadow: 0 6px 20px rgba(233, 185, 73, 0.3);
+}
+.howto { margin-top: 18px; text-align: left; color: var(--muted); font-size: 13px; }
+.howto summary { cursor: pointer; text-align: center; color: var(--text); }
+.howto ul { padding-left: 18px; }
+
+#rotate { display: none; z-index: 10; text-align: center; font: 700 16px var(--font-body); }
+#rotate .phone { width: 46px; height: 80px; border: 3px solid var(--gold); border-radius: 9px; margin: 0 auto 14px; animation: turn 2s ease-in-out infinite; }
+@keyframes turn { 40%, 100% { transform: rotate(-90deg); } }
+@media (orientation: portrait) and (max-width: 820px) { #rotate { display: grid; place-content: center; } }
+
+/* Низкие экраны телефонов */
+@media (max-height: 380px) {
+  .actions { transform: scale(0.86); transform-origin: right bottom; }
+  #minimap { width: 160px; height: 48px; }
+  .me-bars { width: 120px; }
+}
+@media (prefers-reduced-motion: reduce) {
+  #banner, #rotate .phone { animation: none; }
+}

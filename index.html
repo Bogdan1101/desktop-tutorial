@@ -15,6 +15,20 @@
 </head>
 <body>
 <!-- GAME:BEGIN -->
+<div id="err" hidden></div>
+<script>
+  // Показывает ошибку на экране: так видно, что сломалось, даже на телефоне без консоли
+  (function () {
+    function show(msg) {
+      var el = document.getElementById('err');
+      if (!el) return;
+      el.hidden = false;
+      el.textContent = (el.textContent ? el.textContent + '\n' : 'Ошибка: ') + msg;
+    }
+    addEventListener('error', function (e) { show(e.message || (e.target && e.target.src ? 'не загрузился ' + e.target.src : 'неизвестная')); }, true);
+    addEventListener('unhandledrejection', function (e) { show(String(e.reason && e.reason.message || e.reason)); });
+  })();
+</script>
 <canvas id="scene"></canvas>
 
 <div id="hud" hidden>

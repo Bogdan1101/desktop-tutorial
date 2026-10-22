@@ -187,3 +187,8 @@ button:focus-visible { outline: 2px solid var(--gold); outline-offset: 2px; }
 @media (prefers-reduced-motion: reduce) {
   #banner, #rotate .phone { animation: none; }
 }
+
+#err {
+  position: fixed; left: 8px; right: 8px; bottom: 8px; z-index: 20; padding: 8px 10px; border-radius: 8px;
+  background: #3a0d0d; color: #ffd6d0; font: 12px/1.4 ui-monospace, monospace; white-space: pre-wrap; max-height: 40%; overflow: auto;
+}

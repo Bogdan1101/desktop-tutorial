@@ -1,6 +1,6 @@
 // Интерфейс поверх сцены: полоски, цифры урона, кнопки умений, лавка, таблица счёта, миникарта.
 import * as THREE from 'three';
-import { ABILITIES, ITEMS, MAX_ITEMS, MAP, HERO, TEAM, WALLS, BUFFS, STAT_NAMES, TEAM_NAME } from './config.js';
+import { ABILITIES, ITEMS, MAX_ITEMS, MAP, HERO, TEAM, WALLS, BUFFS, STAT_NAMES, TEAM_NAME, SPELLS } from './config.js';
 
 const $ = (id) => document.getElementById(id);
 const fmtTime = (t) => `${Math.floor(t / 60)}:${String(Math.floor(t) % 60).padStart(2, '0')}`;
@@ -33,10 +33,16 @@ export class Hud {
       death: $('death'), deathTimer: $('deathTimer'), shop: $('shop'), shopGold: $('shopGold'), shopHint: $('shopHint'),
       shopBtn: $('shopBtn'), recallBtn: $('recallBtn'), quickBtn: $('quickBtn'), activeBtn: $('activeBtn'),
       barsLayer: $('bars'), floatLayer: $('floaters'), vignette: $('vignette'), score: $('score'), scoreBody: $('scoreBody'),
-      portrait: $('portraitLetter'),
+      portrait: $('portraitLetter'), mpFill: $('mpFill'), mpText: $('mpText'),
     };
     const p = game.player;
     this.el.portrait.textContent = p.name[0];
+    this.spellBtns = p.spells.map((id, i) => {
+      const btn = $(`abS${i + 1}`);
+      btn.querySelector('b').textContent = SPELLS[id].short;
+      btn.setAttribute('aria-label', SPELLS[id].name);
+      return { id, btn, cd: btn.querySelector('.cd'), em: btn.querySelector('em') };
+    });
     this.ab = {};
     for (const k of 'QWER') {
       const btn = $('ab' + k);
@@ -62,7 +68,7 @@ export class Hud {
       else if (victim.team === p.team) this.banner(`Погиб союзник: ${victim.name}`, true);
       else this.banner(`${killer ? killer.name : 'Союзники'} убил ${victim.name}`);
     });
-    game.on('structure', (t) => this.banner(t.team === p.team ? 'Наша башня пала' : 'Вражеская башня разрушена', t.team === p.team));
+    game.on('structure', (t) => { if (t.kind === 'tower') this.banner(t.team === p.team ? 'Наша башня пала' : 'Вражеская башня разрушена', t.team === p.team); });
     game.on('levelup', (h) => { if (h === p) this.banner(`Уровень ${h.level}`); });
     game.on('monster', ({ monster, hero }) => {
       const ours = hero.team === p.team;
@@ -70,6 +76,12 @@ export class Hud {
       else if (hero === p) this.banner(BUFFS[monster.monsterKind].name);
     });
     game.on('dragonspawn', () => this.banner('Дракон появился у реки'));
+    game.on('multikill', ({ hero, text }) => this.banner(hero === p ? text : `${hero.name}: ${text.toLowerCase()}`, hero.team !== p.team));
+    game.on('shutdown', ({ victim, gold }) => this.banner(`Конец серии ${victim.name}! +${gold}`, victim.team === p.team));
+    game.on('structure', (t) => {
+      if (t.kind === 'inhib') this.banner(t.team === p.team ? 'Наш ингибитор разрушен: у врага супер-крипы' : 'Ингибитор разрушен: у нас супер-крипы', t.team === p.team);
+    });
+    game.on('inhibrespawn', (t) => this.banner(t.team === p.team ? 'Наш ингибитор восстановлен' : 'Вражеский ингибитор восстановлен'));
 
     this.buildShop();
   }
@@ -260,9 +272,18 @@ export class Hud {
       const label = rank === 0 ? (k === 'R' && p.level < HERO.ultLevels[0] ? `${HERO.ultLevels[0]} ур.` : '') : cd > 0 ? String(Math.ceil(cd)) : '';
       if (a.em.textContent !== label) a.em.textContent = label;
       a.btn.classList.toggle('off', rank === 0 || cd > 0 || !p.canAct);
+      a.btn.classList.toggle('nomana', rank > 0 && p.mana < p.manaCost(k));
       const pips = '●'.repeat(rank) + '○'.repeat(a.max - rank);
       if (a.pips.textContent !== pips) a.pips.textContent = pips;
       a.rank.hidden = !p.alive || !p.canRankUp(k);
+    }
+
+    // заклинания призывателя
+    for (const sb of this.spellBtns) {
+      const cd = p.spellCd[sb.id];
+      sb.cd.style.setProperty('--p', `${(cd / SPELLS[sb.id].cooldown) * 100}%`);
+      const label = cd > 0 ? String(Math.ceil(cd)) : '';
+      if (sb.em.textContent !== label) sb.em.textContent = label;
     }
 
     // предмет с активным действием
@@ -282,6 +303,8 @@ export class Hud {
       e.lvl.textContent = p.level;
       e.hpFill.style.width = `${(p.hp / p.maxHp) * 100}%`;
       e.hpText.textContent = `${Math.ceil(p.hp)} / ${Math.round(p.maxHp)}`;
+      e.mpFill.style.width = `${(p.mana / p.maxMana) * 100}%`;
+      e.mpText.textContent = `${Math.floor(p.mana)} / ${Math.round(p.maxMana)}`;
       e.xpFill.style.width = p.level >= HERO.maxLevel ? '100%' : `${(p.xp / HERO.xpToLevel(p.level)) * 100}%`;
       e.gold.textContent = Math.floor(p.gold);
       e.killsBlue.textContent = g.kills[0];

@@ -1,6 +1,6 @@
 // Слои поверх карты: затемнение тумана войны и индикатор прицела умений.
 import * as THREE from 'three';
-import { MAP, VISION, ABILITIES, side } from './config.js';
+import { MAP, VISION, ABILITIES, SPELLS, side } from './config.js';
 import { ringDecal, lineDecal } from './models.js';
 
 const W = 144, H = 56; // метры, по 2 пикселя на метр
@@ -72,7 +72,8 @@ export class AimIndicator {
   update(hero, aiming, cancel) {
     this.hide();
     if (!aiming || !hero.alive) return null;
-    const def = ABILITIES[hero.abilityIds[aiming.key]];
+    const spellId = aiming.key[0] === 'S' ? hero.spells[+aiming.key[1] - 1] : null;
+    const def = spellId ? { aim: 'line', range: SPELLS[spellId].distance ?? 4, width: 0.5 } : ABILITIES[hero.abilityIds[aiming.key]];
     const color = cancel ? 0xff5050 : 0x9fe8ff;
     const range = def.range ?? def.radius ?? 3;
     this.range.visible = true;
@@ -80,6 +81,7 @@ export class AimIndicator {
     this.range.position.set(hero.pos.x, 0.09, hero.pos.z);
     let dir;
     if (aiming.manual) dir = { x: aiming.dx, z: aiming.dz };
+    else if (spellId) dir = { x: Math.sin(hero.facing), z: Math.cos(hero.facing) };
     else {
       const t = hero.aimTarget(range, !!def.heroOnly);
       if (t) {

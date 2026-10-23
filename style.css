@@ -163,7 +163,7 @@ button:focus-visible { outline: 2px solid var(--gold); outline-offset: 2px; }
 .item-act b { font-size: 10px; }
 
 #aimCancel {
-  position: absolute; right: calc(300px * var(--btn-scale) + var(--sr)); top: 30%; width: 74px; height: 74px; border-radius: 50%;
+  position: absolute; right: calc(360px * var(--btn-scale) + var(--sr)); top: 30%; width: 74px; height: 74px; border-radius: 50%;
   display: grid; place-items: center; font-weight: 700; font-size: 12px; background: rgba(60, 10, 10, 0.6); border: 2px dashed rgba(255, 120, 120, 0.8);
 }
 #aimCancel.hot { background: rgba(200, 30, 30, 0.75); border-style: solid; }
@@ -282,3 +282,56 @@ button:focus-visible { outline: 2px solid var(--gold); outline-offset: 2px; }
   position: fixed; left: 8px; right: 8px; bottom: 8px; z-index: 20; padding: 8px 10px; border-radius: 8px;
   background: #3a0d0d; color: #ffd6d0; font: 12px/1.4 ui-monospace, monospace; white-space: pre-wrap; max-height: 40%; overflow: auto;
 }
+
+/* --- мана, заклинания, тренировка, обучение --- */
+.bar.mp { height: 9px; }
+.bar.mp i { background: #3f8cff; }
+.bar.mp span { font-size: 8px; line-height: 9px; }
+.ab.nomana { border-color: #3f8cff; }
+.ab.nomana b { color: #7fb2ff; }
+.spell { width: 44px; height: 44px; border-color: #b9c6d2; border-width: 1px; }
+.spell b { font-size: 8px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.02em; }
+.spell .cd { position: absolute; inset: 0; border-radius: 50%; background: conic-gradient(rgba(0, 0, 0, 0.72) var(--p, 0%), transparent 0); pointer-events: none; }
+.spell em { position: absolute; font: 800 14px var(--font-display); font-style: normal; text-shadow: 0 1px 3px #000; pointer-events: none; }
+#abS1 { right: 292px; bottom: 66px; }
+#abS2 { right: 292px; bottom: 120px; }
+
+#tutorialBox {
+  position: absolute; top: calc(52px + var(--st)); left: 50%; transform: translateX(-50%); width: min(460px, 70%);
+  background: rgba(20, 27, 33, 0.92); border: 1px solid var(--gold); border-radius: 12px; padding: 7px 12px;
+  display: grid; gap: 2px; text-align: center; box-shadow: 0 6px 18px rgba(0, 0, 0, 0.45);
+}
+#tutorialBox b { font: 800 11px var(--font-display); color: var(--gold); text-transform: uppercase; letter-spacing: 0.05em; }
+#tutorialBox span { font-size: 13px; }
+
+#practicePanel { position: absolute; left: calc(8px + var(--sl)); top: calc(78px + var(--st)); display: grid; gap: 5px; }
+#practicePanel .util { font-size: 11px; padding: 6px 9px; }
+
+.tag.small { font-size: 11px; margin-top: -6px; }
+.gem { color: #8fe3ff; font-weight: 700; font-variant-numeric: tabular-nums; }
+.gem::before { content: ''; display: inline-block; width: 8px; height: 8px; transform: rotate(45deg); background: #8fe3ff; margin-right: 6px; }
+
+.prof-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 12px; width: 100%; text-align: left; }
+.prof-grid h3, #profile h3 { margin: 0 0 6px; font-size: 12px; text-transform: uppercase; letter-spacing: 0.06em; color: var(--muted); }
+#profile .menu-card > h3 { justify-self: start; }
+.prof-stats { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 6px; font-variant-numeric: tabular-nums; }
+.prof-stats div { background: rgba(20, 27, 33, 0.85); border-radius: 8px; padding: 6px 8px; }
+.prof-stats b { display: block; font: 800 15px var(--font-display); }
+.prof-stats small { color: var(--muted); font-size: 10px; }
+.quests { list-style: none; margin: 0; padding: 0; display: grid; gap: 6px; }
+.quests li { display: grid; grid-template-columns: 1fr auto; gap: 4px 8px; align-items: center; background: rgba(20, 27, 33, 0.85); border-radius: 8px; padding: 6px 8px; font-size: 12px; }
+.quests .qbar { grid-column: 1 / -1; height: 4px; border-radius: 2px; background: rgba(255, 255, 255, 0.1); overflow: hidden; }
+.quests .qbar i { display: block; height: 100%; background: var(--gold); }
+.quests button { padding: 4px 10px; border-radius: 7px; border: 1px solid var(--gold); background: rgba(233, 185, 73, 0.15); color: var(--gold); font-weight: 700; font-size: 11px; cursor: pointer; }
+.quests button:disabled { border-color: rgba(255, 255, 255, 0.15); color: var(--muted); background: none; cursor: default; }
+.skins { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; width: 100%; text-align: left; }
+.skin-hero { background: rgba(20, 27, 33, 0.85); border-radius: 10px; padding: 8px; display: grid; gap: 5px; }
+.skin-hero > b { font: 800 13px var(--font-display); }
+.skin-row { display: flex; align-items: center; gap: 6px; font-size: 11px; }
+.skin-row i { width: 14px; height: 14px; border-radius: 4px; flex: none; border: 1px solid rgba(255, 255, 255, 0.3); }
+.skin-row span { flex: 1; min-width: 0; }
+.skin-row button { padding: 3px 7px; border-radius: 6px; border: 1px solid rgba(255, 255, 255, 0.2); background: none; font-size: 10px; font-weight: 700; cursor: pointer; white-space: nowrap; }
+.skin-row button.on { border-color: var(--gold); color: var(--gold); }
+.skin-row button:disabled { opacity: 0.45; cursor: default; }
+.settings input[type="checkbox"] { width: 22px; height: 22px; accent-color: var(--gold); justify-self: start; }
+@media (max-width: 560px) { .skins { grid-template-columns: 1fr; } }

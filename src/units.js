@@ -1,10 +1,10 @@
 // Игровые объекты: герой, крипы, башни, нексус, монстры леса, снаряды и эффекты.
 import * as THREE from 'three';
 import {
-  TEAM, TEAM_GLOW, CREEP, TOWER, NEXUS, HERO, HEROES, ABILITIES, ITEMS, MONSTERS, side, MAP,
+  TEAM, TEAM_COLOR, TEAM_GLOW, CREEP, TOWER, NEXUS, INHIB, HERO, HEROES, ABILITIES, ITEMS, MONSTERS, SPELLS, side, MAP,
 } from './config.js';
 import {
-  heroModel, creepModel, towerModel, nexusModel, monsterModel, projectileModel, arrowModel,
+  heroModel, creepModel, towerModel, nexusModel, inhibModel, monsterModel, dummyModel, projectileModel, arrowModel,
   ringDecal, discDecal, rockModel, stunModel,
 } from './models.js';
 import { seededRandom } from './world.js';
@@ -16,7 +16,7 @@ export class Unit {
     this.game = game;
     this.id = game.nextId++;
     this.team = team;
-    this.kind = kind; // hero | creep | tower | nexus | monster
+    this.kind = kind; // hero | creep | tower | inhib | nexus | monster | dummy
     this.pos = { x, z };
     this.facing = side(team) < 0 ? Math.PI / 2 : -Math.PI / 2;
     this.alive = true;
@@ -42,6 +42,7 @@ export class Unit {
     this.buffs = new Map();
     this.baseArmor = 0;
     this.baseMr = 0;
+    this.dots = [];
   }
 
   get maxHp() { return this.baseHp; }
@@ -60,7 +61,7 @@ export class Unit {
     for (const s of this.slows) slow = Math.max(slow, s.pct);
     return this.baseSpeed * (1 - slow);
   }
-  get isStructure() { return this.kind === 'tower' || this.kind === 'nexus'; }
+  get isStructure() { return this.kind === 'tower' || this.kind === 'nexus' || this.kind === 'inhib'; }
   get invulnerable() { return false; }
   get stunned() { return this.game.time < this.stunUntil; }
   get slowed() { return this.slows.length > 0; }
@@ -106,7 +107,8 @@ export class Unit {
       }
     }
     if (this.kind === 'monster') this.onAttacked(source);
-    this.game.emit('damage', { target: this, source, amount: shown, type, crit: !!opts.crit });
+    this.game.emit('damage', { target: this, source, amount: shown, type, crit: !!opts.crit, dot: !!opts.dot });
+    if (this.kind === 'dummy' && this.hp < 1) this.hp = 1; // манекен не умирает
     if (this.hp <= 0) {
       this.hp = 0;
       this.die(source);
@@ -126,6 +128,11 @@ export class Unit {
   slow(pct, t) {
     if (!this.alive || this.isStructure) return;
     this.slows.push({ pct, until: this.game.time + t });
+  }
+  // Урон по времени (поджог): тикает раз в полсекунды
+  burn(dps, duration, source) {
+    if (!this.alive) return;
+    this.dots.push({ dps, until: this.game.time + duration, acc: 0, source });
   }
   knockback(fromX, fromZ, distance) {
     if (!this.alive || this.static) return;
@@ -197,6 +204,13 @@ export class Unit {
     if (this.shield > 0 && t >= this.shieldUntil) this.shield = 0;
     if (this.slows.length) this.slows = this.slows.filter((s) => s.until > t);
     for (const [id, b] of this.buffs) if (b.until <= t) this.buffs.delete(id);
+    if (this.dots.length) {
+      for (const d of this.dots) {
+        d.acc += dt;
+        if (d.acc >= 0.5) { d.acc -= 0.5; this.takeDamage(d.dps * 0.5, 'true', d.source, { dot: true }); }
+      }
+      this.dots = this.dots.filter((d) => d.until > t && this.alive);
+    }
     if (this.knock) {
       this.pos.x += this.knock.vx * dt;
       this.pos.z += this.knock.vz * dt;
@@ -240,8 +254,16 @@ export class Unit {
 }
 
 export class Hero extends Unit {
-  constructor(game, team, heroId, isPlayer, slot = 0) {
+  constructor(game, team, heroId, isPlayer, slot = 0, opts = {}) {
     super(game, team, 'hero', side(team) * MAP.fountainX, (slot - 1) * 2);
+    this.talent = opts.talent ?? null;
+    this.spells = opts.spells ?? ['flash', 'ignite'];
+    this.spellCd = Object.fromEntries(this.spells.map((id) => [id, 0]));
+    this.skin = opts.skin ?? 'base';
+    this.streak = 0;
+    this.deathStreak = 0;
+    this.lastKillAt = -99;
+    this.multi = 0;
     this.heroId = heroId;
     this.heroDef = HEROES[heroId];
     this.isPlayer = isPlayer;
@@ -270,9 +292,10 @@ export class Hero extends Unit {
     this.stasisUntil = 0;
     this.empower = null;
     this.aggroTime = -99;
-    this.intent = { mx: 0, mz: 0, attack: false, filter: null, target: null, cast: null, recall: false, active: false };
+    this.intent = { mx: 0, mz: 0, attack: false, filter: null, target: null, cast: null, recall: false, active: false, spell: null };
     this.hp = this.maxHp;
-    this.model = heroModel(team, heroId);
+    this.mana = this.maxMana;
+    this.model = heroModel(team, heroId, this.skin);
     this.shieldMesh = new THREE.Mesh(
       new THREE.SphereGeometry(1.3, 14, 10),
       new THREE.MeshBasicMaterial({ color: 0x9fe8ff, transparent: true, opacity: 0.25, depthWrite: false }),
@@ -288,10 +311,8 @@ export class Hero extends Unit {
     this.recallMesh = discDecal(TEAM_GLOW[team], 1.4, 0.35);
     this.recallMesh.visible = false;
     this.model.group.add(this.shieldMesh, this.stasisMesh, this.recallMesh);
-    if (isPlayer) {
-      const marker = ringDecal(0x6dff8a, 1.05, 0.55, 0.12);
-      this.model.group.add(marker);
-    }
+    // кольцо под героем: зелёное у игрока, цвет команды у остальных
+    this.model.group.add(ringDecal(isPlayer ? 0x6dff8a : TEAM_COLOR[team], 1.05, isPlayer ? 0.6 : 0.45, 0.12));
     game.scene.add(this.model.group);
   }
 
@@ -299,24 +320,33 @@ export class Hero extends Unit {
   lvlStat(key) { const [b, g] = this.heroDef[key]; return b + g * (this.level - 1); }
   item(stat) { return this.itemStats[stat] ?? 0; }
 
-  get maxHp() { return this.lvlStat('hp') + this.item('hp'); }
+  get maxHp() { return (this.lvlStat('hp') + this.item('hp')) * (this.talent === 'fortitude' ? 1.08 : 1); }
+  get maxMana() { return this.lvlStat('mana') + this.item('mana'); }
+  get manaRegen() {
+    return (this.heroDef.manaRegen + this.level * 0.15 + (this.hasBuff('blue') ? 4 : 0)) * (this.talent === 'wisdom' ? 1.3 : 1);
+  }
   get ad() { return this.lvlStat('ad') + this.item('ad'); }
   get ap() { return this.item('ap'); }
   get armor() { return this.lvlStat('armor') + this.item('armor') + this.buffStat('armor'); }
   get mr() { return this.lvlStat('mr') + this.item('mr') + this.buffStat('mr'); }
   get attackSpeed() {
     const [b, g] = this.heroDef.as;
-    return Math.min(2.5, b * (1 + g * (this.level - 1) + this.item('as') + this.buffStat('as')));
+    const talent = this.talent === 'swiftness' ? 0.12 : 0;
+    return Math.min(2.5, b * (1 + g * (this.level - 1) + this.item('as') + this.buffStat('as') + talent));
   }
   get range() { return this.heroDef.range; }
-  get baseSpeed() { return this.heroDef.speed + this.item('speed'); }
+  get baseSpeed() {
+    return this.heroDef.speed + this.item('speed') + this.buffStat('speed') + (this.talent === 'swiftness' ? 0.4 : 0);
+  }
   get crit() { return Math.min(1, this.item('crit')); }
   get lifesteal() { return this.item('lifesteal'); }
-  get cdr() { return Math.min(0.4, this.item('cdr') + (this.hasBuff('blue') ? 0.2 : 0)); }
-  get regen() { return this.heroDef.regen + this.level * 0.3 + this.item('regen') + (this.hasBuff('blue') ? 5 : 0); }
+  get cdr() { return Math.min(0.45, this.item('cdr') + (this.hasBuff('blue') ? 0.2 : 0) + (this.talent === 'wisdom' ? 0.1 : 0)); }
+  get regen() {
+    return this.heroDef.regen + this.level * 0.3 + this.item('regen') + (this.hasBuff('blue') ? 5 : 0) + (this.talent === 'fortitude' ? 2 : 0);
+  }
   get outMul() {
     const dragons = this.game.dragonStacks[this.team] ?? 0;
-    return this.damageMul * (1 + dragons * 0.08) * (this.hasBuff('red') ? 1.15 : 1);
+    return this.damageMul * (1 + dragons * 0.08) * (this.hasBuff('red') ? 1.15 : 1) * (this.talent === 'onslaught' ? 1.08 : 1);
   }
   get inStasis() { return this.game.time < this.stasisUntil; }
   get barHeight() { return 3.2; }
@@ -328,10 +358,12 @@ export class Hero extends Unit {
   recomputeItems() {
     const s = {};
     for (const id of this.items) for (const [k, v] of Object.entries(ITEMS[id].stats)) s[k] = (s[k] ?? 0) + v;
-    const before = this.maxHp;
+    const before = this.maxHp, beforeMana = this.maxMana;
     this.itemStats = s;
     if (this.maxHp > before) this.hp += this.maxHp - before;
+    if (this.maxMana > beforeMana) this.mana += this.maxMana - beforeMana;
     this.hp = Math.min(this.hp, this.maxHp);
+    this.mana = Math.min(this.mana, this.maxMana);
   }
 
   hasItem(id) { return this.items.includes(id); }
@@ -343,10 +375,11 @@ export class Hero extends Unit {
     this.xp += amount;
     while (this.level < HERO.maxLevel && this.xp >= HERO.xpToLevel(this.level)) {
       this.xp -= HERO.xpToLevel(this.level);
-      const before = this.maxHp;
+      const before = this.maxHp, beforeMana = this.maxMana;
       this.level++;
       this.points++;
       this.hp += this.maxHp - before;
+      this.mana += this.maxMana - beforeMana;
       this.game.emit('levelup', this);
     }
   }
@@ -373,8 +406,24 @@ export class Hero extends Unit {
 
   ability(key) { return ABILITIES[this.abilityIds[key]]; }
 
+  manaCost(key) {
+    const r = this.ranks[key];
+    return r ? this.ability(key).mana[r - 1] : 0;
+  }
+
   abilityReady(key) {
-    return this.canAct && this.ranks[key] > 0 && this.cd[key] <= 0;
+    return this.canAct && this.ranks[key] > 0 && this.cd[key] <= 0 && this.mana >= this.manaCost(key);
+  }
+
+  spellReady(id) { return this.canAct && this.spells.includes(id) && this.spellCd[id] <= 0; }
+
+  castSpell(id, aim = null) {
+    if (!this.spellReady(id)) return false;
+    if (!this.game.castSpell(this, id, aim)) return false;
+    this.spellCd[id] = SPELLS[id].cooldown;
+    this.revealUntil = this.game.time + 1.2;
+    this.game.emit('spell', { hero: this, id });
+    return true;
   }
 
   // Ближайший видимый враг для умения: сначала герой, потом всё остальное
@@ -417,8 +466,10 @@ export class Hero extends Unit {
   cast(key, aim = null) {
     if (!this.abilityReady(key)) return false;
     const id = this.abilityIds[key];
+    const cost = this.manaCost(key);
     const ok = this.game.castAbility(this, id, this.ranks[key], aim);
     if (!ok) return false;
+    this.mana -= cost;
     this.cancelRecall();
     const def = ABILITIES[id];
     this.cd[key] = def.cooldown[this.ranks[key] - 1] * (1 - this.cdr);
@@ -454,7 +505,9 @@ export class Hero extends Unit {
   respawn() {
     this.alive = true;
     this.hp = this.maxHp;
+    this.mana = this.maxMana;
     this.shield = 0;
+    this.dots = [];
     this.slows = [];
     this.knock = null;
     this.stunUntil = 0;
@@ -477,18 +530,22 @@ export class Hero extends Unit {
     }
     this.updateStatus(dt);
     for (const k in this.cd) this.cd[k] = Math.max(0, this.cd[k] - dt);
+    for (const k in this.spellCd) this.spellCd[k] = Math.max(0, this.spellCd[k] - dt);
     this.activeCd = Math.max(0, this.activeCd - dt);
+    this.mana = Math.min(this.maxMana, this.mana + this.manaRegen * dt);
     this.hp = Math.min(this.maxHp, this.hp + this.regen * dt * (this.game.time - this.lastDamagedAt > 5 ? 2 : 1));
 
     const it = this.intent;
     if (it.active) { this.useActive(); it.active = false; }
     if (!this.canAct) {
       it.cast = null;
+      it.spell = null;
       this.dash = null;
       this.moving = !!this.knock;
       return;
     }
     if (it.cast) { this.cast(it.cast.key, it.cast.aim); it.cast = null; }
+    if (it.spell) { this.castSpell(it.spell.id, it.spell.aim); it.spell = null; }
     if (it.recall) { this.startRecall(); it.recall = false; }
 
     this.moving = false;
@@ -536,13 +593,24 @@ export class Hero extends Unit {
     }
   }
 
-  syncMesh() {
+  syncMesh(dt = 0) {
     super.syncMesh();
     const m = this.model;
     const t = this.game.time;
-    const bob = this.moving ? Math.abs(Math.sin(t * 11)) * 0.12 : Math.sin(t * 2) * 0.03;
-    m.group.position.y = bob;
-    m.weapon.rotation.x = this.anim > 0 ? -0.9 : (this.moving ? Math.sin(t * 11) * 0.25 : 0);
+    if (m.mixer) {
+      // скелетная модель: выбираем анимацию по состоянию
+      let state = 'Idle';
+      if (this.game.over && this.game.winner === this.team) state = 'Dance';
+      else if (this.anim > 0) state = 'Punch';
+      else if (this.moving) state = 'Running';
+      else if (this.recall) state = 'Wave';
+      m.play(state, this.speed / 7);
+      m.mixer.update(this.stunned ? dt * 0.2 : dt);
+    } else {
+      const bob = this.moving ? Math.abs(Math.sin(t * 11)) * 0.12 : Math.sin(t * 2) * 0.03;
+      m.group.position.y = bob;
+      m.weapon.rotation.x = this.anim > 0 ? -0.9 : (this.moving ? Math.sin(t * 11) * 0.25 : 0);
+    }
     m.orb.scale.setScalar(this.anim > 0 ? 1.8 : 1 + Math.sin(t * 4) * 0.1);
     this.shieldMesh.visible = this.shield > 0;
     this.stasisMesh.visible = this.inStasis;
@@ -551,11 +619,13 @@ export class Hero extends Unit {
 }
 
 export class Creep extends Unit {
-  constructor(game, team, ranged, wave, zOffset) {
+  constructor(game, team, type, wave, zOffset) {
     const s = side(team);
     super(game, team, 'creep', s * (MAP.baseX - 10), zOffset);
-    const st = ranged ? CREEP.ranged : CREEP.melee;
+    const st = CREEP[type];
     this.stats = st;
+    this.creepType = type;
+    const ranged = type === 'ranged';
     this.ranged = ranged;
     const grow = 1 + CREEP.growthPerWave * wave;
     this.baseHp = st.hp * grow;
@@ -567,7 +637,7 @@ export class Creep extends Unit {
     this.laneZ = zOffset;
     this.thinkTimer = Math.random() * 0.3;
     this.forced = null;
-    this.model = creepModel(team, ranged);
+    this.model = creepModel(team, type);
     game.scene.add(this.model.group);
   }
 
@@ -575,7 +645,7 @@ export class Creep extends Unit {
   get range() { return this.stats.range; }
   get attackSpeed() { return 1 / this.stats.cooldown; }
   get baseSpeed() { return this.stats.speed; }
-  get barHeight() { return 1.8; }
+  get barHeight() { return this.creepType === 'super' ? 2.6 : 1.8; }
 
   update(dt) {
     this.updateStatus(dt);
@@ -742,6 +812,70 @@ export class Tower extends Unit {
       r.position.set(this.pos.x + (rand() - 0.5) * 3, 0.2, this.pos.z + (rand() - 0.5) * 3);
       this.game.scene.add(r);
     }
+  }
+}
+
+// Ингибитор: пока он разрушен, у врага в каждой волне идёт супер-крип. Восстанавливается сам.
+export class Inhibitor extends Unit {
+  constructor(game, team, x, hp, order) {
+    super(game, team, 'inhib', x, 0);
+    this.static = true;
+    this.order = order;
+    this.baseHp = hp;
+    this.hp = hp;
+    this.baseArmor = INHIB.armor;
+    this.baseMr = INHIB.mr;
+    this.radius = INHIB.radius;
+    this.respawnTimer = 0;
+    this.model = inhibModel(team);
+    game.scene.add(this.model.group);
+  }
+  get invulnerable() { return this.game.structureProtected(this); }
+  get barHeight() { return 4.2; }
+  update(dt) {
+    if (!this.alive) {
+      this.respawnTimer -= dt;
+      if (this.respawnTimer <= 0) {
+        this.alive = true;
+        this.hp = this.maxHp;
+        this.model.crystal.visible = true;
+        this.game.emit('inhibrespawn', this);
+      }
+      return;
+    }
+    this.updateStatus(dt);
+  }
+  syncMesh() {
+    super.syncMesh();
+    this.model.crystal.rotation.y = this.game.time * 1.2;
+  }
+  die(killer) {
+    super.die(killer);
+    this.respawnTimer = INHIB.respawn;
+    this.everDestroyed = true;
+    this.model.crystal.visible = false;
+  }
+}
+
+// Тренировочный манекен: не бьёт в ответ и не умирает
+export class Dummy extends Unit {
+  constructor(game, x, z) {
+    super(game, TEAM.RED, 'dummy', x, z);
+    this.static = true;
+    this.baseHp = 3000;
+    this.hp = 3000;
+    this.baseArmor = 30;
+    this.baseMr = 30;
+    this.radius = 0.7;
+    this.facing = -Math.PI / 2;
+    this.model = dummyModel();
+    game.scene.add(this.model.group);
+  }
+  get barHeight() { return 2.4; }
+  get name() { return 'Манекен'; }
+  update(dt) {
+    this.updateStatus(dt);
+    if (this.game.time - this.lastDamagedAt > 3) this.hp = Math.min(this.maxHp, this.hp + this.maxHp * 0.5 * dt);
   }
 }
 
@@ -925,19 +1059,24 @@ export class Burst {
 export class DeathAnim {
   constructor(game, unit, removeAfter) {
     this.game = game;
+    this.model = unit.model;
     this.group = unit.model.group;
     this.removeAfter = removeAfter;
     this.t = 0;
-    this.life = 0.9;
+    this.skeletal = !!unit.model.mixer;
+    this.life = this.skeletal ? 1.8 : 0.9;
     this.dir = Math.random() > 0.5 ? 1 : -1;
     this.done = false;
+    if (this.skeletal) this.model.play('Death');
   }
   update(dt) {
     this.t += dt;
+    if (this.skeletal) this.model.mixer.update(dt);
     if (this.t >= this.life) this.done = true;
   }
   sync() {
     const k = Math.min(1, this.t / this.life);
+    if (this.skeletal) { this.group.position.y = k > 0.7 ? -(k - 0.7) * 3 : 0; return; }
     this.group.rotation.z = this.dir * Math.min(1, k * 2.5) * 1.45;
     this.group.position.y = k > 0.5 ? -(k - 0.5) * 3 : 0;
   }

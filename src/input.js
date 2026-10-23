@@ -128,7 +128,7 @@ export class Input {
     this.bindHold(document.getElementById('atkBtn'), () => { this.attackHeld = true; this.filter = null; }, () => { this.attackHeld = false; });
     this.bindHold(document.getElementById('atkCreep'), () => { this.attackHeld = true; this.filter = 'creep'; }, () => { this.attackHeld = false; this.filter = null; });
     this.bindHold(document.getElementById('atkTower'), () => { this.attackHeld = true; this.filter = 'tower'; }, () => { this.attackHeld = false; this.filter = null; });
-    for (const key of 'QWER') this.bindAbility(document.getElementById('ab' + key), key);
+    for (const key of ['Q', 'W', 'E', 'R', 'S1', 'S2']) this.bindAbility(document.getElementById('ab' + key), key);
     for (const btn of document.querySelectorAll('[data-rank]')) {
       btn.addEventListener('pointerdown', (e) => { e.preventDefault(); e.stopPropagation(); this.actions.push({ type: 'rank', key: btn.dataset.rank }); });
     }
@@ -147,6 +147,8 @@ export class Input {
         if (e.ctrlKey) this.actions.push({ type: 'rank', key: abil[e.code] });
         else this.casts.push({ key: abil[e.code] });
       }
+      if (e.code === 'KeyZ') this.casts.push({ key: 'S1' });
+      if (e.code === 'KeyX') this.casts.push({ key: 'S2' });
       if (e.code === 'KeyB') this.actions.push({ type: 'recall' });
       if (e.code === 'KeyP') this.actions.push({ type: 'shop' });
       if (e.code === 'Tab') { e.preventDefault(); this.actions.push({ type: 'score' }); }

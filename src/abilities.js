@@ -1,6 +1,7 @@
 // Умения героев. aim — куда целился игрок: { dir } для линии и рывка, { point } для области.
 // Без aim умение наводится само: на ближайшего видимого героя, иначе на ближайшего врага.
-import { ABILITIES, ITEMS } from './config.js';
+import { ABILITIES, ITEMS, SPELLS } from './config.js';
+import { isWalkable } from './nav.js';
 import { Skillshot, AreaStrike, dist } from './units.js';
 
 function autoDir(hero, range, heroOnly = false) {
@@ -201,4 +202,42 @@ export function botAim(hero, id, target, error) {
   const dx = px - hero.pos.x, dz = pz - hero.pos.z;
   const d = Math.hypot(dx, dz) || 1;
   return { dir: { x: dx / d, z: dz / d } };
+}
+
+// Заклинания призывателя
+export function castSpell(game, hero, id, aim) {
+  const def = SPELLS[id];
+  if (id === 'flash') {
+    const dir = aim?.dir ?? moveOrFacingDir(hero);
+    // скачок на полную длину или до последней проходимой точки
+    let d = def.distance;
+    while (d > 0.5 && !isWalkable(hero.pos.x + dir.x * d, hero.pos.z + dir.z * d, hero.radius * 0.8)) d -= 0.5;
+    game.burst(hero.pos.x, hero.pos.z, 0xfff6a8, 1.2);
+    hero.pos.x += dir.x * d;
+    hero.pos.z += dir.z * d;
+    hero.facing = Math.atan2(dir.x, dir.z);
+    hero.cancelRecall();
+    game.burst(hero.pos.x, hero.pos.z, 0xfff6a8, 1.4);
+    return true;
+  }
+  if (id === 'heal') {
+    hero.heal(def.heal(hero.level));
+    hero.addBuff('healSpeed', 2, { stats: { speed: 2 } });
+    game.burst(hero.pos.x, hero.pos.z, 0x7dff9a, 1.8);
+    return true;
+  }
+  if (id === 'barrier') {
+    hero.shield = Math.max(hero.shield, def.shield(hero.level));
+    hero.shieldUntil = game.time + 2;
+    game.burst(hero.pos.x, hero.pos.z, 0xfff1c0, 1.6);
+    return true;
+  }
+  if (id === 'ignite') {
+    const t = hero.aimTarget(def.range, true);
+    if (!t) return false;
+    t.burn(def.damage(hero.level) / def.duration, def.duration, hero);
+    game.burst(t.pos.x, t.pos.z, 0xff6a2a, 1.3);
+    return true;
+  }
+  return false;
 }

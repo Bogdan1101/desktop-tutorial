@@ -1,7 +1,10 @@
 // Настройки игрока. Хранятся в браузере; если хранилище недоступно, работают значения по умолчанию.
 
 const KEY = 'dota3-settings';
-const DEFAULTS = { sfx: 0.8, music: 0.4, quality: 'medium', buttons: 1, hero: 'pyro', mode: '3v3', difficulty: 'normal' };
+const DEFAULTS = {
+  sfx: 0.8, music: 0.4, quality: 'medium', buttons: 1, vibration: true,
+  hero: 'pyro', mode: '3v3', difficulty: 'normal', talent: 'onslaught', spells: ['flash', 'ignite'],
+};
 
 export function loadSettings() {
   try {

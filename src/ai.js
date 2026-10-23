@@ -183,6 +183,7 @@ export class HeroBrain {
         if (!enemiesClose && !underAttack && !h.recall) { h.intent.recall = true; this.goal = null; return; }
         if (h.recall) return;
         this.goal = { x: fountainX, z: 0 };
+        this.useSpellsDefensive(eDist);
         if (eDist < 6) {
           if (h.activeItem && hpPct < 0.2) h.intent.active = true;
           for (const key of ['W', 'E', 'Q']) {
@@ -216,6 +217,7 @@ export class HeroBrain {
         this.mode = 'fight';
         this.target = target;
         this.useAbilities(target);
+        this.useSpellsOffensive(target);
         return;
       }
       if (h.lastDamagedAt > g.time - 1) {
@@ -229,6 +231,27 @@ export class HeroBrain {
     if (this.role === 'jungle' && this.jungle()) return;
     if (this.role === 'lane' && this.helpAlly()) return;
     this.lane();
+  }
+
+  useSpellsOffensive(e) {
+    const h = this.hero;
+    const d = dist(h.pos, e.pos);
+    if (h.spellReady('ignite') && e.hp / e.maxHp < 0.35 && d < 6.5) h.castSpell('ignite');
+    if (h.spellReady('flash') && e.hp / e.maxHp < 0.15 && d > h.range + 1.5 && d < h.range + 4.5 && h.hp / h.maxHp > 0.4) {
+      h.castSpell('flash', { dir: { x: (e.pos.x - h.pos.x) / d, z: (e.pos.z - h.pos.z) / d } });
+    }
+    this.useSpellsDefensive(d);
+  }
+
+  useSpellsDefensive(eDist) {
+    const h = this.hero, g = this.game;
+    const hpPct = h.hp / h.maxHp;
+    const hurt = g.time - h.lastDamagedAt < 1;
+    if (hpPct < 0.25 && hurt && h.spellReady('heal')) h.castSpell('heal');
+    if (hpPct < 0.3 && hurt && h.spellReady('barrier')) h.castSpell('barrier');
+    if (this.mode === 'retreat' && hpPct < 0.18 && hurt && eDist < 4 && h.spellReady('flash')) {
+      h.castSpell('flash', { dir: { x: side(h.team), z: 0 } });
+    }
   }
 
   // Прийти на помощь союзнику, который дерётся неподалёку
@@ -276,6 +299,11 @@ export class HeroBrain {
     const hpPct = h.hp / h.maxHp;
     this.mode = 'lane';
     const front = this.frontLine();
+    // лечебное растение рядом, если здоровья мало
+    if (hpPct < 0.6) {
+      const plant = g.plants.find((pl) => g.time >= pl.readyAt && Math.hypot(pl.x - h.pos.x, pl.z - h.pos.z) < 14 && !this.towerDanger(pl.x, pl.z));
+      if (plant) { this.goal = { x: plant.x, z: plant.z }; this.mode = 'plant'; return; }
+    }
     const creep = this.bestCreep();
     if (creep) { this.target = creep; return; }
     const structure = g.units.find((u) => u.isStructure && u.canBeHitBy(h.team) && dist(u.pos, h.pos) < h.range + u.radius + 6

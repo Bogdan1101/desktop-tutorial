@@ -2,18 +2,25 @@
 // поэтому матч можно прокручивать без экрана (для тестов).
 import {
   TEAM, STRUCTURES, CREEP, HERO, HEROES, MAP, FOUNTAIN, ITEMS, MAX_ITEMS, DIFFICULTY, MONSTERS, BUFFS, VISION, side,
+  TALENTS, PLANTS, STREAK_NAMES, SPREE_NAMES,
 } from './config.js';
-import { Hero, Creep, Tower, Nexus, Monster, Burst, DeathAnim, dist } from './units.js';
+import { Hero, Creep, Tower, Inhibitor, Nexus, Monster, Dummy, Burst, DeathAnim, dist } from './units.js';
 import { resolveTerrain, brushAt } from './nav.js';
-import { castAbility } from './abilities.js';
+import { castAbility, castSpell } from './abilities.js';
+import { plantModel } from './models.js';
 import { HeroBrain } from './ai.js';
 
 const ROSTER = Object.keys(HEROES);
 
 export class Game {
-  constructor(scene, { difficulty = 'normal', mode = '3v3', heroId = 'pyro', autoplay = false } = {}) {
+  constructor(scene, {
+    difficulty = 'normal', mode = '3v3', heroId = 'pyro', autoplay = false,
+    talent = 'onslaught', spells = ['flash', 'ignite'], skin = 'base',
+  } = {}) {
     this.scene = scene;
-    this.mode = mode;
+    this.mode = mode; // 1v1 | 3v3 | practice
+    this.practice = mode === 'practice' ? { waves: false, noCooldowns: false } : null;
+    this.teamStats = [{ towers: 0, dragons: 0 }, { towers: 0, dragons: 0 }];
     this.diff = DIFFICULTY[difficulty] ?? DIFFICULTY.normal;
     this.units = [];
     this.projectiles = [];
@@ -34,14 +41,18 @@ export class Game {
     for (const team of [TEAM.BLUE, TEAM.RED]) {
       for (const st of STRUCTURES) {
         const x = team === TEAM.BLUE ? st.x : -st.x;
-        this.units.push(st.kind === 'tower' ? new Tower(this, team, x, st.hp, st.order) : new Nexus(this, team, x, st.hp, st.order));
+        const Cls = { tower: Tower, inhib: Inhibitor, nexus: Nexus }[st.kind];
+        this.units.push(new Cls(this, team, x, st.hp, st.order));
       }
     }
 
     // Состав команд
     const others = ROSTER.filter((h) => h !== heroId);
     let blue, red;
-    if (mode === '1v1') {
+    if (mode === 'practice') {
+      blue = [heroId];
+      red = [];
+    } else if (mode === '1v1') {
       blue = [heroId];
       red = [others[Math.floor(Math.random() * others.length)]];
     } else {
@@ -49,8 +60,14 @@ export class Game {
       red = [...ROSTER].sort(() => Math.random() - 0.5);
     }
     this.heroes = [[], []];
-    blue.forEach((id, i) => this.heroes[0].push(new Hero(this, TEAM.BLUE, id, i === 0, blue.length === 1 ? 1 : i)));
-    red.forEach((id, i) => this.heroes[1].push(new Hero(this, TEAM.RED, id, false, red.length === 1 ? 1 : i)));
+    // ботам — случайный талант и заклинания под роль
+    const botOpts = (id) => ({
+      talent: Object.keys(TALENTS)[Math.floor(Math.random() * 4)],
+      spells: ['flash', id === 'grok' ? 'heal' : Math.random() < 0.5 ? 'ignite' : 'barrier'],
+    });
+    blue.forEach((id, i) => this.heroes[0].push(new Hero(this, TEAM.BLUE, id, i === 0, blue.length === 1 ? 1 : i,
+      i === 0 ? { talent, spells, skin } : botOpts(id))));
+    red.forEach((id, i) => this.heroes[1].push(new Hero(this, TEAM.RED, id, false, red.length === 1 ? 1 : i, botOpts(id))));
     this.player = this.heroes[0][0];
     for (const h of this.heroes[1]) h.damageMul = this.diff.damageMul;
     this.allHeroes = [...this.heroes[0], ...this.heroes[1]];
@@ -65,6 +82,23 @@ export class Game {
       for (const h of bots) {
         const diff = team === 1 ? this.diff : DIFFICULTY.normal;
         this.brains.push(new HeroBrain(this, h, diff, h === jungler ? 'jungle' : 'lane'));
+      }
+    }
+
+    // Тренировка: манекены посреди линии
+    if (mode === 'practice') {
+      for (const [x, z] of [[-6, -2.5], [-3, 2], [0, -1]]) this.units.push(new Dummy(this, x, z));
+    }
+
+    // Лечебные растения
+    this.plants = [];
+    for (const [x, z] of PLANTS.spots) {
+      for (const [px, pz] of [[x, z], [-x, -z]]) {
+        const model = plantModel();
+        model.group.position.set(px, 0, pz);
+        model.group.visible = false;
+        scene.add(model.group);
+        this.plants.push({ x: px, z: pz, readyAt: PLANTS.first, model });
       }
     }
 
@@ -94,7 +128,8 @@ export class Game {
   }
 
   structureProtected(s) {
-    return this.units.some((u) => u.alive && u.isStructure && u.team === s.team && u.order < s.order);
+    // после первого разрушения ингибитора нексус остаётся открытым, даже когда ингибитор восстановится
+    return this.units.some((u) => u.alive && u.isStructure && u.team === s.team && u.order < s.order && !u.everDestroyed);
   }
 
   isVisible(team, unit) {
@@ -152,7 +187,11 @@ export class Game {
     const killerHero = killer && killer.kind === 'hero' ? killer : null;
     if (unit.kind === 'creep') {
       const enemyTeam = 1 - unit.team;
-      if (killerHero && killerHero.team === enemyTeam) { killerHero.gainGold(unit.stats.gold); killerHero.cs++; }
+      const lastHit = killerHero && killerHero.team === enemyTeam ? killerHero : null;
+      if (lastHit) { lastHit.gainGold(unit.stats.gold); lastHit.cs++; }
+      // половина золота героям рядом, которые не добили
+      const near = this.heroes[enemyTeam].filter((h) => h.alive && h !== lastHit && dist(h.pos, unit.pos) < HERO.nearbyGoldRange);
+      for (const h of near) h.gainGold((unit.stats.gold * HERO.nearbyGoldShare) / near.length, false);
       this.shareXp(enemyTeam, unit.pos, unit.stats.xp);
       this.effects.push(new DeathAnim(this, unit, true));
     } else if (unit.kind === 'monster') {
@@ -163,6 +202,7 @@ export class Game {
         this.shareXp(killerHero.team, unit.pos, def.xp);
         if (def.buff === 'dragon') {
           this.dragonStacks[killerHero.team] = Math.min(4, this.dragonStacks[killerHero.team] + 1);
+          this.teamStats[killerHero.team].dragons++;
           for (const h of this.heroes[killerHero.team]) if (h !== killerHero) h.gainGold(def.gold * 0.5);
         } else {
           killerHero.addBuff(def.buff, BUFFS[def.buff].duration);
@@ -183,9 +223,22 @@ export class Game {
       // кто убил и кто помогал: все враги, бившие героя последние 10 секунд
       const recent = [...unit.damagedBy.entries()].filter(([h, t]) => this.time - t < 10 && h.team === enemyTeam).map(([h]) => h);
       const credit = killerHero && killerHero.team === enemyTeam ? killerHero : recent[recent.length - 1] ?? null;
+      // за серию убийств жертвы — бонус, за серию её смертей — меньше золота
+      const shutdown = unit.streak >= 3 ? Math.min(HERO.shutdownMax, (unit.streak - 2) * HERO.shutdownPerKill) : 0;
+      const bounty = HERO.killGold * Math.max(0.4, 1 - 0.15 * unit.deathStreak) + shutdown;
+      if (shutdown) this.emit('shutdown', { victim: unit, killer: credit, gold: shutdown });
+      unit.streak = 0;
+      unit.deathStreak++;
+      unit.multi = 0;
       if (credit) {
         credit.kills++;
-        credit.gainGold(HERO.killGold);
+        credit.streak++;
+        credit.deathStreak = 0;
+        credit.multi = this.time - credit.lastKillAt < HERO.multiKillWindow ? credit.multi + 1 : 1;
+        credit.lastKillAt = this.time;
+        if (STREAK_NAMES[credit.multi]) this.emit('multikill', { hero: credit, text: STREAK_NAMES[credit.multi] });
+        else if (SPREE_NAMES[credit.streak]) this.emit('multikill', { hero: credit, text: SPREE_NAMES[credit.streak] });
+        credit.gainGold(bounty);
         const helpers = recent.filter((h) => h !== credit);
         for (const h of helpers) { h.assists++; h.gainGold(HERO.assistGold / helpers.length); }
       }
@@ -193,9 +246,10 @@ export class Game {
       unit.damagedBy.clear();
       this.effects.push(new DeathAnim(this, unit, false));
       this.emit('herokill', { victim: unit, killer: credit });
-    } else if (unit.kind === 'tower') {
+    } else if (unit.kind === 'tower' || unit.kind === 'inhib') {
       const enemyTeam = 1 - unit.team;
-      for (const h of this.heroes[enemyTeam]) { h.gainGold(150); h.gainXp(100); }
+      if (unit.kind === 'tower') this.teamStats[enemyTeam].towers++;
+      for (const h of this.heroes[enemyTeam]) { h.gainGold(unit.kind === 'tower' ? 150 : 100); h.gainXp(100); }
       this.burst(unit.pos.x, unit.pos.z, 0xffd27a, 4);
       this.shake(0.5);
       this.emit('structure', unit);
@@ -261,18 +315,25 @@ export class Game {
   }
 
   castAbility(hero, id, rank, aim) { return castAbility(this, hero, id, rank, aim); }
+  castSpell(hero, id, aim) { return castSpell(this, hero, id, aim); }
+
+  // Разрушен ли ингибитор команды: тогда у врага идут супер-крипы
+  inhibDown(team) {
+    return this.units.some((u) => u.kind === 'inhib' && u.team === team && !u.alive);
+  }
 
   spawnWave() {
     for (const team of [TEAM.BLUE, TEAM.RED]) {
       const s = side(team);
-      const add = (ranged, i, row) => {
-        const z = (i - (ranged ? 0.5 : 1)) * 1.6;
-        const c = new Creep(this, team, ranged, this.wave, z);
+      const add = (type, i, row) => {
+        const z = (i - (type === 'ranged' ? 0.5 : 1)) * 1.6;
+        const c = new Creep(this, team, type, this.wave, z);
         c.pos.x = s * (MAP.baseX - 10 + row * 1.6);
         this.units.push(c);
       };
-      for (let i = 0; i < CREEP.meleeCount; i++) add(false, i, 0);
-      for (let i = 0; i < CREEP.rangedCount; i++) add(true, i, 1);
+      for (let i = 0; i < CREEP.meleeCount; i++) add('melee', i, 0);
+      for (let i = 0; i < CREEP.rangedCount; i++) add('ranged', i, 1);
+      if (this.inhibDown(1 - team)) add('super', 1, -1);
     }
     this.wave++;
   }
@@ -281,9 +342,17 @@ export class Game {
     if (this.over) { this.updateFx(dt); return; }
     this.time += dt;
     if (this.time >= this.nextWave) {
-      this.spawnWave();
+      if (!this.practice || this.practice.waves) this.spawnWave();
       this.nextWave += CREEP.waveInterval;
     }
+    if (this.practice?.noCooldowns) {
+      for (const h of this.allHeroes) {
+        for (const k in h.cd) h.cd[k] = Math.min(h.cd[k], 0.3);
+        for (const k in h.spellCd) h.spellCd[k] = 0;
+        h.mana = h.maxMana;
+      }
+    }
+    this.updatePlants(dt);
     for (const c of this.camps) {
       if (c.monster) continue;
       c.timer -= dt;
@@ -297,7 +366,7 @@ export class Game {
     this.visionTimer -= dt;
     if (this.visionTimer <= 0) { this.visionTimer = 0.1; this.computeVision(); }
     for (const b of this.brains) b.update(dt);
-    for (const u of this.units) if (u.alive || u.kind === 'hero') u.update(dt);
+    for (const u of this.units) if (u.alive || u.kind === 'hero' || u.kind === 'inhib') u.update(dt);
     this.resolveCollisions(dt);
     this.fountains(dt);
     for (const p of this.projectiles) p.update(dt);
@@ -375,11 +444,27 @@ export class Game {
   trail(hero) { this.effects.push(new Burst(this, hero.pos.x, 1, hero.pos.z, 0x9fe8ff, 1.4, 0.3)); }
   shake(a) { this.shakeAmount = Math.max(this.shakeAmount, a); }
 
-  syncMeshes() {
+  updatePlants(dt) {
+    for (const pl of this.plants) {
+      const ready = this.time >= pl.readyAt;
+      pl.model.group.visible = ready;
+      if (!ready) continue;
+      const h = this.allHeroes.find((x) => x.alive && Math.hypot(x.pos.x - pl.x, x.pos.z - pl.z) < PLANTS.radius + x.radius);
+      if (!h) continue;
+      h.heal(h.maxHp * PLANTS.heal);
+      h.mana = Math.min(h.maxMana, h.mana + h.maxMana * PLANTS.mana);
+      pl.readyAt = this.time + PLANTS.respawn;
+      this.burst(pl.x, pl.z, 0xff7ab6, 1.6);
+      this.emit('plant', { hero: h, plant: pl });
+    }
+  }
+
+  syncMeshes(dt = 0) {
     const p = this.player;
+    for (const pl of this.plants) if (pl.model.group.visible) pl.model.fruit.rotation.y += dt * 2;
     for (const u of this.units) {
       if (!u.model) continue;
-      if (u.alive || u.isStructure) u.syncMesh();
+      if (u.alive || u.isStructure) u.syncMesh(dt);
       // туман войны: врагов вне видимости не рисуем
       if (u.alive && !u.static && u.team !== p.team) u.model.group.visible = this.isVisible(p.team, u);
     }

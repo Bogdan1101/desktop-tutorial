@@ -42,6 +42,7 @@
       <div class="portrait"><span id="portraitLetter">П</span><b id="lvl">1</b></div>
       <div class="me-bars">
         <div class="bar hp"><i id="hpFill"></i><span id="hpText">0 / 0</span></div>
+        <div class="bar mp"><i id="mpFill"></i><span id="mpText">0 / 0</span></div>
         <div class="bar xp"><i id="xpFill"></i></div>
         <div class="me-row"><span class="gold" id="gold">500</span><span class="buffs" id="buffs"></span></div>
       </div>
@@ -70,6 +71,8 @@
     <button class="rank" data-rank="E" id="rankE" hidden aria-label="Улучшить E">+</button>
     <button class="rank" data-rank="R" id="rankR" hidden aria-label="Улучшить R">+</button>
     <button class="act item-act" id="activeBtn" data-act="active" hidden aria-label="Песочные часы"><b>Часы</b><i class="cd"></i><em></em></button>
+    <button class="act spell" id="abS1"><b></b><i class="cd"></i><em></em></button>
+    <button class="act spell" id="abS2"><b></b><i class="cd"></i><em></em></button>
   </div>
   <div id="aimCancel" hidden>Отмена</div>
 
@@ -77,6 +80,15 @@
     <button class="util" data-act="recall" id="recallBtn">Домой</button>
     <button class="util" data-act="shop" id="shopBtn">Лавка</button>
     <button class="util quick" data-act="quickbuy" id="quickBtn" hidden></button>
+  </div>
+
+  <div id="tutorialBox" hidden><b></b><span></span></div>
+
+  <div id="practicePanel" hidden>
+    <button class="util" data-act="pr-level">+1 уровень</button>
+    <button class="util" data-act="pr-gold">+1000 золота</button>
+    <button class="util" data-act="pr-cd" id="prCd">Без перезарядки</button>
+    <button class="util" data-act="pr-waves" id="prWaves">Крипы</button>
   </div>
 
   <div id="death" hidden>
@@ -113,6 +125,7 @@
       <label for="setSfx">Звуки <input type="range" id="setSfx" min="0" max="1" step="0.05"></label>
       <label for="setMusic">Музыка <input type="range" id="setMusic" min="0" max="1" step="0.05"></label>
       <label for="setButtons">Размер кнопок <input type="range" id="setButtons" min="0.8" max="1.3" step="0.05"></label>
+      <label for="setVibro">Вибрация <input type="checkbox" id="setVibro"></label>
       <div class="seg" role="radiogroup" aria-label="Качество графики">
         <span>Графика</span>
         <label><input type="radio" name="quality" id="qLow" value="low"><span>Низкая</span></label>
@@ -135,6 +148,9 @@
       <label><input type="radio" name="mode" id="mode3" value="3v3"><span>3 на 3</span></label>
     </div>
     <div class="heroes" id="heroCards" role="radiogroup" aria-label="Герой"></div>
+    <div class="seg" role="radiogroup" aria-label="Талант" id="talents"><span>Талант</span></div>
+    <p class="tag small" id="talentDesc"></p>
+    <div class="seg" role="group" aria-label="Заклинания" id="spellPick"><span>Заклинания (2)</span></div>
     <div class="seg" role="radiogroup" aria-label="Сложность ботов">
       <label><input type="radio" name="diff" id="diffEasy" value="easy"><span>Легко</span></label>
       <label><input type="radio" name="diff" id="diffNormal" value="normal"><span>Нормально</span></label>
@@ -142,6 +158,9 @@
     </div>
     <div class="menu-buttons">
       <button class="play" id="playBtn">Играть</button>
+      <button class="ghost" id="practiceBtn">Тренировка</button>
+      <button class="ghost" id="tutorialBtn">Обучение</button>
+      <button class="ghost" id="profileBtn">Профиль <span class="gem" id="menuGems">0</span></button>
       <button class="ghost" id="settingsBtn">Настройки</button>
     </div>
     <details class="howto">
@@ -160,10 +179,31 @@
   </div>
 </div>
 
+<div id="profile" class="screen" hidden>
+  <div class="menu-card wide">
+    <h2 class="screen-title">Профиль</h2>
+    <p class="tag"><span class="gem" id="profGems">0</span> кристаллов. Выполняйте задания и покупайте скины.</p>
+    <div class="prof-grid">
+      <section>
+        <h3>Статистика</h3>
+        <div id="profStats" class="prof-stats"></div>
+      </section>
+      <section>
+        <h3>Задания на сегодня</h3>
+        <ul id="profQuests" class="quests"></ul>
+      </section>
+    </div>
+    <h3>Скины</h3>
+    <div id="profSkins" class="skins"></div>
+    <button class="play" id="profileBack">Назад</button>
+  </div>
+</div>
+
 <div id="end" class="screen" hidden>
   <div class="menu-card wide">
     <h1 id="endTitle">Победа</h1>
     <p class="tag" id="endStats"></p>
+    <p class="tag" id="endQuests"></p>
     <div class="score-body" id="endScore"></div>
     <button class="play" id="againBtn">Ещё раз</button>
   </div>

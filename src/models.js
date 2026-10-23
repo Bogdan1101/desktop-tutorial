@@ -1,6 +1,8 @@
 // Low-poly модели, собранные из простых фигур. Позже их можно заменить на готовые модели.
 import * as THREE from 'three';
-import { TEAM_COLOR, TEAM_GLOW } from './config.js';
+import { GLTFLoader } from '../vendor/GLTFLoader.js';
+import { clone as cloneSkinned } from '../vendor/SkeletonUtils.js';
+import { TEAM_COLOR, TEAM_GLOW, SKINS } from './config.js';
 
 const matCache = new Map();
 export function mat(color, opts = {}) {
@@ -27,9 +29,8 @@ const STONE_DARK = 0x5d6270;
 const GOLD = 0xd9c27a;
 export const darker = (c, k = 0.6) => new THREE.Color(c).multiplyScalar(k).getHex();
 
-function pyroModel(team) {
+function pyroModel(team, c) {
   const g = new THREE.Group();
-  const c = TEAM_COLOR[team];
   const robe = mesh(new THREE.CylinderGeometry(0.32, 0.62, 1.15, 7), mat(c), 0, 0.58, 0);
   const torso = mesh(new THREE.CylinderGeometry(0.44, 0.36, 0.62, 7), mat(darker(c)), 0, 1.45, 0);
   const head = mesh(new THREE.IcosahedronGeometry(0.31, 0), mat(SKIN), 0, 2.02, 0);
@@ -46,9 +47,8 @@ function pyroModel(team) {
   return { group: g, orb, weapon };
 }
 
-function grokModel(team) {
+function grokModel(team, c) {
   const g = new THREE.Group();
-  const c = TEAM_COLOR[team];
   const legs = mesh(new THREE.BoxGeometry(0.9, 0.8, 0.6), mat(STONE_DARK), 0, 0.4, 0);
   const body = mesh(new THREE.BoxGeometry(1.25, 1.0, 0.85), mat(c), 0, 1.3, 0);
   const belt = mesh(new THREE.BoxGeometry(1.3, 0.18, 0.9), mat(GOLD), 0, 0.85, 0);
@@ -72,9 +72,8 @@ function grokModel(team) {
   return { group: g, orb, weapon };
 }
 
-function liraModel(team) {
+function liraModel(team, c) {
   const g = new THREE.Group();
-  const c = TEAM_COLOR[team];
   const legs = mesh(new THREE.CylinderGeometry(0.22, 0.3, 0.9, 6), mat(0x3b3226), 0, 0.45, 0);
   const torso = mesh(new THREE.CylinderGeometry(0.34, 0.28, 0.75, 6), mat(c), 0, 1.25, 0);
   const cape = mesh(new THREE.ConeGeometry(0.5, 1.2, 6, 1, true), mat(darker(c, 0.7)), 0, 1.2, -0.12);
@@ -92,15 +91,140 @@ function liraModel(team) {
   return { group: g, orb, weapon };
 }
 
-export function heroModel(team, heroId) {
-  if (heroId === 'grok') return grokModel(team);
-  if (heroId === 'lira') return liraModel(team);
-  return pyroModel(team);
+export function skinColors(team, heroId, skinId) {
+  const skin = (SKINS[heroId] ?? []).find((x) => x.id === skinId);
+  return { main: skin?.main ?? TEAM_COLOR[team], trim: skin?.trim ?? darker(TEAM_COLOR[team], 0.55) };
 }
 
-export function creepModel(team, ranged) {
+// --- Анимированный робот (CC0, Quaternius) -------------------------------------
+let robot = null;
+
+export async function loadRobot(url) {
+  const gltf = await new GLTFLoader().loadAsync(url);
+  const box = new THREE.Box3().setFromObject(gltf.scene);
+  robot = { scene: gltf.scene, clips: gltf.animations, height: box.max.y - box.min.y };
+  return robot;
+}
+
+export function robotReady() { return !!robot; }
+
+const HERO_SIZE = { pyro: 2.7, grok: 3, lira: 2.6 };
+
+function attach(bone, obj, meters) {
+  // аксессуар задаётся в метрах, а кости робота живут в своём масштабе
+  const ws = new THREE.Vector3();
+  bone.getWorldScale(ws);
+  obj.scale.multiplyScalar(meters / ws.x);
+  bone.add(obj);
+}
+
+function robotHero(team, heroId, colors) {
+  const g = new THREE.Group();
+  const root = cloneSkinned(robot.scene);
+  const k = (HERO_SIZE[heroId] ?? 2.3) / robot.height;
+  root.scale.setScalar(k);
+  root.traverse((o) => {
+    if (!o.isMesh) return;
+    o.castShadow = true;
+    o.frustumCulled = false;
+    const name = o.material.name;
+    o.material = o.material.clone();
+    if (name === 'Main') o.material.color.set(colors.main);
+    if (name === 'Grey') o.material.color.set(colors.trim).lerp(new THREE.Color(0x9aa0aa), 0.5);
+  });
+  g.add(root);
+  g.updateMatrixWorld(true);
+  const bones = {};
+  root.traverse((o) => { if (o.isBone) bones[o.name] = o; });
+  const handR = bones.Palm2R ?? bones.LowerArmR;
+  const handL = bones.Palm2L ?? bones.LowerArmL;
+  const head = bones.Head;
+  const unit = new THREE.Group(); // аксессуары в метрах
+  let orb;
+  if (heroId === 'pyro') {
+    const staff = new THREE.Group();
+    staff.add(mesh(new THREE.CylinderGeometry(0.05, 0.06, 1.9, 5), mat(0x6b4a2f), 0, 0, 0));
+    orb = mesh(new THREE.IcosahedronGeometry(0.2, 0), mat(0xffa63d, { glow: true }), 0, 1.05, 0, false);
+    staff.add(orb);
+    staff.rotation.z = Math.PI; // в ладони робота ось Y смотрит вниз
+    if (handR) attach(handR, staff, 1);
+    const hat = mesh(new THREE.ConeGeometry(0.62, 1.1, 7), mat(colors.trim), 0, 1.15, 0);
+    const brim = mesh(new THREE.CylinderGeometry(0.95, 0.95, 0.08, 12), mat(colors.trim), 0, 0.62, 0);
+    const hg = new THREE.Group(); hg.add(hat, brim);
+    if (head) attach(head, hg, 1);
+  } else if (heroId === 'grok') {
+    const shield = new THREE.Group();
+    const disc = mesh(new THREE.CylinderGeometry(0.6, 0.6, 0.12, 8), mat(colors.trim), 0, 0, 0);
+    disc.rotation.x = Math.PI / 2;
+    const boss = mesh(new THREE.IcosahedronGeometry(0.18, 0), mat(0xd9c27a), 0, 0, 0.1);
+    shield.add(disc, boss);
+    if (handL) attach(handL, shield, 1);
+    const helm = new THREE.Group();
+    const hornL = mesh(new THREE.ConeGeometry(0.14, 0.75, 4), mat(0xeee6cf), -0.68, 0.7, 0);
+    hornL.rotation.z = 0.6;
+    const hornR = hornL.clone(); hornR.position.x = 0.68; hornR.rotation.z = -0.6;
+    helm.add(hornL, hornR);
+    if (head) attach(head, helm, 1);
+    orb = mesh(new THREE.OctahedronGeometry(0.15), mat(TEAM_GLOW[team], { glow: true }), 0, 1.5, 0.5, false);
+    unit.add(orb);
+  } else {
+    const bow = new THREE.Group();
+    const arc = mesh(new THREE.TorusGeometry(0.7, 0.05, 4, 10, Math.PI), mat(0x7a5230), 0, 0, 0);
+    arc.rotation.z = -Math.PI / 2;
+    bow.add(arc, mesh(new THREE.CylinderGeometry(0.01, 0.01, 1.4, 3), mat(0xf2efe6), 0, 0, 0, false));
+    if (handL) attach(handL, bow, 1);
+    const plume = mesh(new THREE.ConeGeometry(0.2, 1.1, 5), mat(colors.trim), 0, 0.85, -0.45);
+    plume.rotation.x = -0.9;
+    const pg = new THREE.Group(); pg.add(plume);
+    if (head) attach(head, pg, 1);
+    orb = mesh(new THREE.OctahedronGeometry(0.12), mat(0xfff1a8, { glow: true }), 0, 1.4, 0.5, false);
+    unit.add(orb);
+  }
+  g.add(unit);
+  const mixer = new THREE.AnimationMixer(root);
+  const actions = {};
+  for (const clip of robot.clips) actions[clip.name] = mixer.clipAction(clip);
+  for (const n of ['Punch', 'Death']) {
+    if (!actions[n]) continue;
+    actions[n].setLoop(THREE.LoopOnce, 1);
+    actions[n].clampWhenFinished = true;
+  }
+  let current = null;
+  const play = (name, speed = 1) => {
+    const a = actions[name];
+    if (!a) return;
+    if (name === 'Running') a.timeScale = 0.7 + speed * 0.5;
+    if (name === 'Punch') a.timeScale = 2.2;
+    if (current === name) return;
+    const prev = actions[current];
+    a.reset().fadeIn(0.12).play();
+    if (prev) prev.fadeOut(0.12);
+    current = name;
+  };
+  play('Idle');
+  return { group: g, orb, weapon: unit, mixer, play, skeletal: true };
+}
+
+export function heroModel(team, heroId, skinId = 'base') {
+  const colors = skinColors(team, heroId, skinId);
+  if (robot) return robotHero(team, heroId, colors);
+  if (heroId === 'grok') return grokModel(team, colors.main);
+  if (heroId === 'lira') return liraModel(team, colors.main);
+  return pyroModel(team, colors.main);
+}
+
+export function creepModel(team, type) {
   const g = new THREE.Group();
   const c = TEAM_COLOR[team];
+  const ranged = type === 'ranged';
+  if (type === 'super') {
+    const body = mesh(new THREE.BoxGeometry(1.2, 1.3, 0.9), mat(darker(c, 0.7)), 0, 0.9, 0);
+    const head = mesh(new THREE.BoxGeometry(0.7, 0.6, 0.7), mat(0xd9c27a), 0, 1.85, 0);
+    const club = mesh(new THREE.BoxGeometry(0.25, 0.25, 1.4), mat(0x6b4a2f), 0.75, 1, 0.5);
+    const orb = mesh(new THREE.OctahedronGeometry(0.2), mat(TEAM_GLOW[team], { glow: true }), 0, 2.4, 0, false);
+    g.add(body, head, club, orb);
+    return { group: g, orb };
+  }
   const s = ranged ? 0.85 : 1;
   const body = mesh(new THREE.BoxGeometry(0.7 * s, 0.8 * s, 0.55 * s), mat(darker(c, 0.8)), 0, 0.55 * s, 0);
   const head = mesh(new THREE.BoxGeometry(0.45 * s, 0.4 * s, 0.45 * s), mat(ranged ? SKIN : STONE), 0, 1.15 * s, 0);
@@ -228,4 +352,43 @@ export function lineDecal(color, opacity = 0.35) {
   const m = new THREE.Mesh(geo, new THREE.MeshBasicMaterial({ color, transparent: true, opacity, depthWrite: false }));
   m.position.y = 0.08;
   return m;
+}
+
+export function inhibModel(team) {
+  const g = new THREE.Group();
+  g.add(mesh(new THREE.CylinderGeometry(1.9, 2.2, 0.6, 8), mat(STONE_DARK), 0, 0.3, 0));
+  const crystal = mesh(new THREE.IcosahedronGeometry(1.1, 0), mat(TEAM_GLOW[team], { glow: true, opacity: 0.85 }), 0, 1.9, 0, false);
+  g.add(crystal);
+  for (let i = 0; i < 4; i++) {
+    const p = mesh(new THREE.BoxGeometry(0.3, 2.4, 0.3), mat(STONE), Math.cos(i * Math.PI / 2) * 1.6, 1.2, Math.sin(i * Math.PI / 2) * 1.6);
+    g.add(p);
+  }
+  return { group: g, crystal };
+}
+
+export function dummyModel() {
+  const g = new THREE.Group();
+  g.add(mesh(new THREE.CylinderGeometry(0.1, 0.12, 2.2, 5), mat(0x6b4a2f), 0, 1.1, 0));
+  g.add(mesh(new THREE.CylinderGeometry(0.42, 0.36, 0.9, 7), mat(0xd8b56a), 0, 1.35, 0));
+  g.add(mesh(new THREE.IcosahedronGeometry(0.3, 0), mat(0xe2c27e), 0, 2.1, 0));
+  const arms = mesh(new THREE.CylinderGeometry(0.07, 0.07, 1.6, 5), mat(0x6b4a2f), 0, 1.55, 0);
+  arms.rotation.z = Math.PI / 2;
+  g.add(arms);
+  const target = mesh(new THREE.TorusGeometry(0.25, 0.05, 4, 12), mat(0xff4a3d), 0, 1.4, 0.38);
+  g.add(target);
+  return { group: g, orb: target };
+}
+
+export function plantModel() {
+  const g = new THREE.Group();
+  g.add(mesh(new THREE.CylinderGeometry(0.05, 0.07, 0.8, 5), mat(0x3f7a33), 0, 0.4, 0));
+  for (let i = 0; i < 4; i++) {
+    const leaf = mesh(new THREE.ConeGeometry(0.16, 0.6, 4), mat(0x5c9a3f), Math.cos(i * 1.6) * 0.25, 0.3, Math.sin(i * 1.6) * 0.25);
+    leaf.rotation.z = Math.cos(i * 1.6) * 0.9;
+    leaf.rotation.x = -Math.sin(i * 1.6) * 0.9;
+    g.add(leaf);
+  }
+  const fruit = mesh(new THREE.IcosahedronGeometry(0.28, 0), mat(0xff7ab6, { glow: true }), 0, 0.95, 0, false);
+  g.add(fruit);
+  return { group: g, fruit };
 }

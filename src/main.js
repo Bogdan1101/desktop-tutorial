@@ -262,7 +262,7 @@ function renderProfile() {
 // --- матч -------------------------------------------------------------------------
 function newMatch(opts = {}) {
   if (scene) disposeScene(scene);
-  if (hud) hud.clear();
+  if (hud) hud.dispose();
   scene = new THREE.Scene();
   world = buildWorld(scene, settings.quality);
   const heroId = opts.heroId ?? settings.hero;
@@ -288,7 +288,7 @@ function newMatch(opts = {}) {
   $('tutorialBox').hidden = true;
   tutorial = null;
   // для автотестов: состояние матча, ввода и экрана
-  window.dota3 = { game, simulate, input, hud, marker, get state() { return state; } };
+  window.dota3 = { game, simulate, input, hud, marker, renderer, get state() { return state; } };
 }
 
 function bindEvents(g) {

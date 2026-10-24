@@ -61,7 +61,8 @@ export class Hud {
     this.fail = null; // { key, reason, until, btn } — текущая строка отказа
     this.failShown = 0; // сколько раз строка появлялась заново (для проверок на «спам»)
     game.on('castrejected', (e) => { if (e.hero === game.player) this.onCastRejected(e); });
-    addEventListener('resize', () => this.placeCastFail());
+    this.onResize = () => this.placeCastFail();
+    addEventListener('resize', this.onResize);
     this.tipEl = $('skillTip');
     this.tipEl.hidden = true;
     this.tipKey = null;
@@ -488,6 +489,12 @@ export class Hud {
     this.el.banner.hidden = true;
     this.toggleShop(false);
     this.toggleScore(false);
+  }
+
+  // Конец матча: снимаем свой обработчик с окна, чтобы старый интерфейс не держался в памяти
+  dispose() {
+    this.clear();
+    removeEventListener('resize', this.onResize);
   }
 }
 

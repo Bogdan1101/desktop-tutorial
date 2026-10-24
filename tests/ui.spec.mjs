@@ -20,7 +20,13 @@ const REASONS = [
 ];
 
 async function boot(test) {
-  const t = await openGame({ start: 'practiceBtn', setup: test.fonts === 'ok' ? undefined : blockFonts });
+  const t = await openGame({
+    start: 'practiceBtn',
+    setup: async (ctx) => {
+      if (test.fonts !== 'ok') await blockFonts(ctx);
+      if (test.init) await ctx.addInitScript(test.init);
+    },
+  });
   t.tap = (pt) => t.burst([['touchStart', [{ ...pt, id: 9 }]], ['touchEnd', []]]);
   t.fail = () => t.page.evaluate(() => {
     const el = document.getElementById('castFail');
@@ -164,5 +170,34 @@ test('со шрифтами Google без ошибок', async ({ page }) => {
   const err = await page.evaluate(() => document.getElementById('err').hidden ? null : document.getElementById('err').textContent);
   check(err === null, 'ошибок быть не должно', err);
 }, { fonts: 'ok' });
+
+// Обработчики resize на окне: сколько сейчас подписано (считаем до загрузки игры)
+function countResize() {
+  const live = new Set();
+  const add = window.addEventListener, remove = window.removeEventListener;
+  window.addEventListener = function (type, fn, ...rest) { if (this === window && type === 'resize') live.add(fn); return add.call(this, type, fn, ...rest); };
+  window.removeEventListener = function (type, fn, ...rest) { if (this === window && type === 'resize') live.delete(fn); return remove.call(this, type, fn, ...rest); };
+  window.resizeListeners = () => live.size;
+}
+
+test('смена матчей не копит обработчики интерфейса', async ({ page }) => {
+  const before = await page.evaluate(() => window.resizeListeners());
+  for (let i = 0; i < 4; i++) {
+    // пауза → выйти в меню → снова тренировка: каждый раз новый матч и новый интерфейс
+    await page.keyboard.press('Escape');
+    await page.waitForFunction(() => window.dota3.state === 'pause');
+    await page.evaluate(() => document.getElementById('quitBtn').click());
+    await page.waitForFunction(() => window.dota3.state === 'menu');
+    await page.evaluate(() => document.getElementById('practiceBtn').click());
+    await page.waitForFunction(() => window.dota3.state === 'play');
+  }
+  const after = await page.evaluate(() => window.resizeListeners());
+  check(after === before, `обработчиков resize стало ${after}, было ${before}`);
+  // строка отказа в новом интерфейсе по-прежнему пересчитывает место при повороте экрана
+  await page.evaluate(() => { const { game } = window.dota3; game.emit('castrejected', { hero: game.player, key: 'R', reason: 'control', control: 'stasis' }); });
+  await page.setViewportSize({ width: 667, height: 375 });
+  const m = await measure(page);
+  check(!m.hidden && !m.hits.length && m.r <= m.vw, 'после смены матчей строка отказа должна вставать на место', m);
+}, { init: countResize });
 
 await run(tests, boot);

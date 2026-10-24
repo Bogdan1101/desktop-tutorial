@@ -5,7 +5,8 @@
   "scripts": {
     "www": "rm -rf www && mkdir www && cp -r index.html style.css manifest.webmanifest sw.js icons vendor src assets www/",
     "android": "npm run www && npx cap add android && npx cap sync android",
-    "test:input": "node tests/input.spec.mjs"
+    "test:input": "node tests/input.spec.mjs",
+    "test:combat": "node tests/combat.spec.mjs"
   },
   "devDependencies": {
     "@capacitor/android": "6.2.2",

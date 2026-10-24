@@ -57,6 +57,10 @@ export class Hud {
 
     $('shopClose').onclick = () => this.toggleShop(false);
     this.el.shop.onpointerdown = (e) => { if (e.target === this.el.shop) this.toggleShop(false); };
+    this.failEl = $('castFail');
+    this.fail = null; // { key, reason, until, btn } — текущая строка отказа
+    this.failShown = 0; // сколько раз строка появлялась заново (для проверок на «спам»)
+    game.on('castrejected', (e) => { if (e.hero === game.player) this.onCastRejected(e); });
     this.tipEl = $('skillTip');
     this.tipEl.hidden = true;
     this.tipKey = null;
@@ -151,6 +155,50 @@ export class Hud {
       s.textContent = p.items[i] ? ITEMS[p.items[i]].name : '';
       slots.append(s);
     }
+  }
+
+  // --- отказ в применении умения ---
+  castFailText({ hero, key, reason, control }) {
+    const def = hero.ability(key);
+    if (reason === 'dead') return 'Герой погиб';
+    if (reason === 'control') {
+      return { stun: 'Оглушение: нельзя применять умения', knock: 'Отбрасывание: нельзя применять умения',
+        stasis: 'Остановка времени: нельзя применять умения' }[control] ?? 'Сейчас нельзя применять умения';
+    }
+    if (reason === 'unlearned') {
+      if (def.ult && hero.level < HERO.ultLevels[0]) return `Откроется на ${HERO.ultLevels[0]} уровне`;
+      return 'Не изучено: нет очков умений';
+    }
+    if (reason === 'cooldown') return `Перезарядка: ещё ${Math.ceil(hero.cd[key])} с`;
+    if (reason === 'mana') return `Не хватает маны: нужно ещё ${Math.ceil(hero.manaCost(key) - hero.mana)}`;
+    return 'Нельзя применить';
+  }
+
+  // Одна строка над кнопками. Повтор того же отказа, пока строка видна, только продлевает её,
+  // не перезапуская анимацию, — частые нажатия не превращаются в мигание.
+  onCastRejected(e) {
+    const now = performance.now();
+    const same = this.fail && this.fail.key === e.key && this.fail.reason === e.reason && now < this.fail.until;
+    const btn = this.ab[e.key]?.btn;
+    if (!same) {
+      this.clearCastFeedback();
+      this.failShown++;
+      this.failEl.hidden = false;
+      this.failEl.style.animation = 'none';
+      void this.failEl.offsetWidth;
+      this.failEl.style.animation = '';
+      if (btn) { btn.classList.remove('rejected'); void btn.offsetWidth; btn.classList.add('rejected'); }
+    }
+    const k = document.createElement('b');
+    k.textContent = e.key;
+    this.failEl.replaceChildren(k, this.castFailText(e));
+    this.fail = { key: e.key, reason: e.reason, until: now + 1400, btn };
+  }
+
+  clearCastFeedback() {
+    if (this.fail?.btn) this.fail.btn.classList.remove('rejected');
+    this.fail = null;
+    this.failEl.hidden = true;
   }
 
   // --- описание умения (зажать кнопку) ---
@@ -297,6 +345,8 @@ export class Hud {
       if (sb.em.textContent !== label) sb.em.textContent = label;
     }
 
+    if (this.fail && performance.now() >= this.fail.until) this.clearCastFeedback();
+
     // предмет с активным действием
     const act = p.activeItem;
     this.el.activeBtn.hidden = !act;
@@ -392,6 +442,7 @@ export class Hud {
   }
 
   clear() {
+    this.clearCastFeedback();
     for (const [, b] of this.bars) b.el.remove();
     this.bars.clear();
     for (const f of this.floats) f.el.remove();

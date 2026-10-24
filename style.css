@@ -355,3 +355,16 @@ button:focus-visible { outline: 2px solid var(--gold); outline-offset: 2px; }
 #skillTip .stats .phys { color: #ffb36b; }
 #skillTip .fx { color: #9fe8ff; }
 #skillTip .next { color: var(--muted); font-size: 11px; border-top: 1px solid rgba(255, 255, 255, 0.08); padding-top: 5px; }
+
+/* --- отказ в применении умения: короткая строка над кнопками --- */
+#castFail {
+  position: absolute; right: 0; bottom: 254px; max-width: 260px; padding: 5px 10px; border-radius: 8px;
+  background: rgba(46, 10, 8, 0.92); border: 1px solid #ff6a5a; color: #ffe1dc;
+  font: 700 12px/1.25 var(--font-body); white-space: nowrap; pointer-events: none;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.5); animation: castFailIn 0.16s ease-out;
+}
+#castFail b { color: #fff; font-family: var(--font-display); margin-right: 6px; }
+@keyframes castFailIn { from { transform: translateY(4px); opacity: 0; } }
+.ab.rejected { border-color: #ff5a4a; box-shadow: 0 0 0 3px rgba(255, 90, 74, 0.55), 0 3px 10px rgba(0, 0, 0, 0.5); animation: castReject 0.32s ease-out; }
+@keyframes castReject { 25% { translate: -3px 0; } 50% { translate: 3px 0; } 75% { translate: -2px 0; } }
+@media (prefers-reduced-motion: reduce) { #castFail, .ab.rejected { animation: none; } }

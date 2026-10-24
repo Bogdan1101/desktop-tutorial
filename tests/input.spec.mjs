@@ -1,60 +1,12 @@
 // Проверки управления на настоящих касаниях (Chrome DevTools Protocol, мультитач).
 // Запуск: npm run test:input   (нужны пакет playwright и браузер Chromium)
-import http from 'node:http';
-import fs from 'node:fs';
-import path from 'node:path';
-import { fileURLToPath } from 'node:url';
-import { chromium } from 'playwright';
-
-const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
-const TYPES = { '.html': 'text/html', '.js': 'text/javascript', '.css': 'text/css', '.json': 'application/json', '.glb': 'model/gltf-binary', '.svg': 'image/svg+xml', '.png': 'image/png', '.webmanifest': 'application/manifest+json' };
-
-// --- статический сервер -----------------------------------------------------------
-const server = http.createServer((req, res) => {
-  const url = decodeURIComponent(new URL(req.url, 'http://x').pathname);
-  const file = path.join(ROOT, url === '/' ? 'index.html' : url);
-  if (!file.startsWith(ROOT) || !fs.existsSync(file) || fs.statSync(file).isDirectory()) { res.writeHead(404); res.end(); return; }
-  res.writeHead(200, { 'Content-Type': TYPES[path.extname(file)] ?? 'application/octet-stream' });
-  fs.createReadStream(file).pipe(res);
-});
-await new Promise((r) => server.listen(0, '127.0.0.1', r));
-const BASE = `http://127.0.0.1:${server.address().port}/`;
-
-const browser = await chromium.launch({
-  executablePath: process.env.CHROMIUM_PATH || undefined,
-  args: ['--use-angle=swiftshader', '--enable-unsafe-swiftshader'],
-});
+import { openGame, check, run } from './harness.mjs';
 
 // --- помощники ---------------------------------------------------------------------
 async function boot() {
-  const ctx = await browser.newContext({ viewport: { width: 844, height: 390 }, hasTouch: true, isMobile: true });
-  // низкое качество графики: программный рендер в тестах медленный, а жесты чувствительны ко времени
-  await ctx.addInitScript(() => {
-    if (!sessionStorage.getItem('test-init')) {
-      sessionStorage.setItem('test-init', '1');
-      localStorage.clear();
-      localStorage.setItem('dota3-settings', JSON.stringify({ quality: 'low', mode: '1v1', vibration: false }));
-    }
-  });
-  const page = await ctx.newPage();
-  const errors = [];
-  page.on('pageerror', (e) => errors.push(e.message));
-  // ускоряем время, чтобы проверки не ждали медленный программный рендер
-  await page.goto(BASE + '?speed=3');
-  await page.waitForFunction(() => window.dota3?.game);
-  await page.evaluate(() => document.getElementById('playBtn').click());
-  await page.waitForFunction(() => window.dota3.state === 'play');
-  const cdp = await ctx.newCDPSession(page);
-  const t = {
-    page, ctx, errors,
-    touch: (type, pts) => cdp.send('Input.dispatchTouchEvent', { type, touchPoints: pts }),
-    // Пакет касаний без ожидания ответа на каждое. Ожидание ответа раздвигает события на длину
-    // кадра (браузер выдаёт движения к следующему кадру), и быстрый жест превращается в долгий.
-    burst: (steps) => Promise.all(steps.map(([type, pts]) => cdp.send('Input.dispatchTouchEvent', { type, touchPoints: pts }))),
-    async center(sel) {
-      const b = await page.locator(sel).boundingBox();
-      return { x: b.x + b.width / 2, y: b.y + b.height / 2 };
-    },
+  const t = await openGame();
+  const { page } = t;
+  Object.assign(t, {
     snap: () => page.evaluate(() => {
       const i = window.dota3.input;
       return {
@@ -72,12 +24,7 @@ async function boot() {
         recall: !!window.dota3.game.player.recall,
       };
     }),
-    // ждём, пока игра обработает ввод (несколько кадров игрового времени)
-    async frames(sec = 0.4) {
-      const t0 = await page.evaluate(() => window.dota3.game.time);
-      await page.waitForFunction((t) => window.dota3.state !== 'play' || window.dota3.game.time > t, t0 + sec, { timeout: 15000 });
-    },
-  };
+  });
   t.joy = { x: 110, y: 290 };
   t.q = await t.center('#abQ');
   t.w = await t.center('#abW');
@@ -102,9 +49,7 @@ const clean = (s) => !s.joy && s.moveX === 0 && s.moveZ === 0 && !s.aiming && !s
   && !s.tipShown && !s.joyShown && s.held.length === 0 && !s.cancelHover;
 
 const tests = [];
-const ONLY = process.env.ONLY; // запустить только проверки, в названии которых есть эта строка
 const test = (name, fn) => tests.push({ name, fn });
-function check(cond, msg, data) { if (!cond) throw new Error(msg + (data ? ` ${JSON.stringify(data)}` : '')); }
 
 // --- обычное поведение ---------------------------------------------------------------
 test('тап по умению применяет его', async (t) => {
@@ -501,22 +446,4 @@ test('зажатая клавиша не залипает после скрыт�
 });
 
 // --- запуск -------------------------------------------------------------------------
-let failed = 0;
-for (const { name, fn } of tests.filter((x) => !ONLY || x.name.includes(ONLY))) {
-  const t = await boot();
-  try {
-    await fn(t);
-    if (t.errors.length) throw new Error('ошибки на странице: ' + t.errors.join('; '));
-    console.log(`  ok  ${name}`);
-  } catch (e) {
-    failed++;
-    console.log(`FAIL  ${name}\n      ${e.message}`);
-  } finally {
-    await t.ctx.close();
-  }
-}
-await browser.close();
-server.close();
-const total = tests.filter((x) => !ONLY || x.name.includes(ONLY)).length;
-console.log(`\n${total - failed} из ${total} проверок пройдено`);
-process.exit(failed ? 1 : 0);
+await run(tests, boot);

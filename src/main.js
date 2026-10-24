@@ -5,7 +5,7 @@ import { Game } from './game.js';
 import { Hud, scoreTable } from './hud.js';
 import { Input } from './input.js';
 import { Sound } from './audio.js';
-import { FogOverlay, AimIndicator } from './overlays.js';
+import { FogOverlay, AimIndicator, TargetMarker } from './overlays.js';
 import { loadSettings, saveSettings } from './settings.js';
 import { loadRobot } from './models.js';
 import { Tutorial } from './tutorial.js';
@@ -32,7 +32,7 @@ const camera = new THREE.PerspectiveCamera(36, 1, 0.5, 220);
 const CAM_OFFSET = new THREE.Vector3(0, 26, 15);
 const camTarget = new THREE.Vector3(-MAP.fountainX + 6, 0, 0);
 
-let scene, world, game, hud, fog, aim, tutorial = null;
+let scene, world, game, hud, fog, aim, marker, tutorial = null;
 const input = new Input();
 let state = 'menu'; // menu | play | pause | end
 
@@ -41,6 +41,7 @@ let state = 'menu'; // menu | play | pause | end
 function setState(next) {
   state = next;
   input.setEnabled(next === 'play');
+  hud?.clearCastFeedback();
 }
 
 function applyQuality() {
@@ -63,6 +64,7 @@ addEventListener('resize', resize);
 function disposeScene(s) {
   s.traverse((o) => { if (o.geometry) o.geometry.dispose(); });
   fog?.dispose();
+  marker?.dispose();
 }
 
 // Короткая вибрация (на телефонах с Android; где не поддерживается — молчит)
@@ -270,6 +272,7 @@ function newMatch(opts = {}) {
   });
   fog = new FogOverlay(scene);
   aim = new AimIndicator(scene);
+  marker = new TargetMarker(scene);
   hud = new Hud(game, camera);
   input.reset();
   const p = game.player;
@@ -285,7 +288,7 @@ function newMatch(opts = {}) {
   $('tutorialBox').hidden = true;
   tutorial = null;
   // для автотестов: состояние матча, ввода и экрана
-  window.dota3 = { game, simulate, input, get state() { return state; } };
+  window.dota3 = { game, simulate, input, hud, marker, get state() { return state; } };
 }
 
 function bindEvents(g) {
@@ -500,6 +503,8 @@ function frame(now) {
     aim.update(p, input.aiming, input.cancelHover);
     hud.setTip(state === 'play' ? input.tipKey : null);
   }
+  // маркер цели атаки: только в идущем матче и только на видимую цель
+  marker.update(state === 'play' && !game.over ? p.attackTarget : null, dt);
   sound.listener = p.pos;
 
   const follow = state === 'menu' ? { x: Math.sin(now / 7000) * 34, z: Math.cos(now / 9000) * 6 } : p.pos;

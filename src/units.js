@@ -411,8 +411,33 @@ export class Hero extends Unit {
     return r ? this.ability(key).mana[r - 1] : 0;
   }
 
-  abilityReady(key) {
-    return this.canAct && this.ranks[key] > 0 && this.cd[key] <= 0 && this.mana >= this.manaCost(key);
+  // Почему умение сейчас нельзя применить; null — можно. Одна проверка и для игры, и для подсказок.
+  castBlock(key) {
+    if (!this.alive) return 'dead';
+    if (!this.canAct) return 'control';
+    if (this.ranks[key] === 0) return 'unlearned';
+    if (this.cd[key] > 0) return 'cooldown';
+    if (this.mana < this.manaCost(key)) return 'mana';
+    return null;
+  }
+
+  abilityReady(key) { return this.castBlock(key) === null; }
+
+  // Отказ на команду игрока (боты вызывают cast напрямую и сюда не попадают)
+  rejectCast(key) {
+    const reason = this.castBlock(key);
+    if (!reason) return;
+    const control = this.stunned ? 'stun' : this.knock ? 'knock' : this.inStasis ? 'stasis' : null;
+    this.game.emit('castrejected', { hero: this, key, reason, control });
+  }
+
+  // Цель обычной атаки, которую герой сейчас бьёт или к которой идёт; null — не атакует.
+  // Невидимую команде цель не возвращает, чтобы маркер не выдавал врагов в тумане.
+  get attackTarget() {
+    const t = this.target;
+    if (!this.alive || !this.intent.attack || !t) return null;
+    if (!t.canBeHitBy(this.team) || !this.game.isVisible(this.team, t)) return null;
+    return t;
   }
 
   spellReady(id) { return this.canAct && this.spells.includes(id) && this.spellCd[id] <= 0; }
@@ -524,6 +549,8 @@ export class Hero extends Unit {
 
   update(dt) {
     if (!this.alive) {
+      // нажатие умения, пока герой мёртв, — отказ, а не бросок после возрождения
+      if (this.intent.cast) { this.rejectCast(this.intent.cast.key); this.intent.cast = null; }
       this.respawnTimer -= dt;
       if (this.respawnTimer <= 0) this.respawn();
       return;
@@ -538,13 +565,18 @@ export class Hero extends Unit {
     const it = this.intent;
     if (it.active) { this.useActive(); it.active = false; }
     if (!this.canAct) {
+      if (it.cast) this.rejectCast(it.cast.key);
       it.cast = null;
       it.spell = null;
       this.dash = null;
       this.moving = !!this.knock;
       return;
     }
-    if (it.cast) { this.cast(it.cast.key, it.cast.aim); it.cast = null; }
+    if (it.cast) {
+      if (this.abilityReady(it.cast.key)) this.cast(it.cast.key, it.cast.aim);
+      else this.rejectCast(it.cast.key);
+      it.cast = null;
+    }
     if (it.spell) { this.castSpell(it.spell.id, it.spell.aim); it.spell = null; }
     if (it.recall) { this.startRecall(); it.recall = false; }
 

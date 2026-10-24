@@ -111,3 +111,51 @@ export class AimIndicator {
     return { dir };
   }
 }
+
+// Маркер цели обычной атаки: кольцо на земле под целью, которую выбрала логика боя.
+// Жёлтый с тёмной подложкой — не путается с голубым прицелом умений, зелёным кольцом игрока
+// и цветами команд. Всё создаётся один раз на матч; в кадре меняются только позиция и масштаб.
+const MARKER_COLOR = 0xffd84a;
+
+export class TargetMarker {
+  constructor(scene) {
+    this.group = new THREE.Group();
+    this.spin = new THREE.Group();
+    const under = ringDecal(0x000000, 1.08, 0.5, 0.3);
+    const ring = ringDecal(MARKER_COLOR, 1, 0.95, 0.13);
+    this.group.add(under, ring, this.spin);
+    // четыре засечки-стрелки, смотрят к центру
+    const tri = new THREE.BufferGeometry();
+    tri.setAttribute('position', new THREE.Float32BufferAttribute([-0.16, 0, 0, 0.16, 0, 0, 0, 0, -0.26], 3));
+    const triMat = new THREE.MeshBasicMaterial({ color: MARKER_COLOR, transparent: true, opacity: 0.95, depthWrite: false, side: THREE.DoubleSide });
+    for (let i = 0; i < 4; i++) {
+      const t = new THREE.Mesh(tri, triMat);
+      const a = (i * Math.PI) / 2;
+      t.position.set(Math.sin(a) * 1.28, 0.07, Math.cos(a) * 1.28);
+      t.rotation.y = a;
+      this.spin.add(t);
+    }
+    this.group.traverse((o) => { o.renderOrder = 3; });
+    this.group.visible = false;
+    this.target = null;
+    this.t = 0;
+    scene.add(this.group);
+  }
+
+  // target — цель атаки игрока (hero.attackTarget) или null
+  update(target, dt) {
+    this.target = target;
+    this.group.visible = !!target;
+    if (!target) return;
+    this.t += dt;
+    const r = target.radius + 0.35;
+    this.group.position.set(target.pos.x, 0, target.pos.z);
+    this.group.scale.setScalar(r * (1 + Math.sin(this.t * 6) * 0.04));
+    this.spin.rotation.y += dt * 1.2;
+  }
+
+  dispose() {
+    this.group.traverse((o) => { if (o.material) o.material.dispose(); });
+    this.group.removeFromParent();
+  }
+}

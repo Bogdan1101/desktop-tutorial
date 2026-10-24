@@ -1,7 +1,7 @@
 // Слои поверх карты: затемнение тумана войны и индикатор прицела умений.
 import * as THREE from 'three';
 import { MAP, VISION, ABILITIES, SPELLS, side } from './config.js';
-import { ringDecal, lineDecal } from './models.js';
+import { ringDecal, lineDecal, disposeObject } from './models.js';
 
 const W = 144, H = 56; // метры, по 2 пикселя на метр
 
@@ -156,7 +156,7 @@ export class TargetMarker {
   }
 
   dispose() {
-    this.group.traverse((o) => { if (o.material) o.material.dispose(); });
+    disposeObject(this.group);
     this.group.removeFromParent();
   }
 }

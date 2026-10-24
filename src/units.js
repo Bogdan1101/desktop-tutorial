@@ -5,7 +5,7 @@ import {
 } from './config.js';
 import {
   heroModel, creepModel, towerModel, nexusModel, inhibModel, monsterModel, dummyModel, projectileModel, arrowModel,
-  ringDecal, discDecal, rockModel, stunModel,
+  ringDecal, discDecal, rockModel, stunModel, disposeObject, markShared,
 } from './models.js';
 import { seededRandom } from './world.js';
 
@@ -248,8 +248,12 @@ export class Unit {
 
   get barHeight() { return 2; }
 
+  // Модель убрана навсегда: снять со сцены и освободить её ресурсы GPU
   removeMesh() {
-    if (this.model) this.game.scene.remove(this.model.group);
+    if (!this.model) return;
+    this.game.scene.remove(this.model.group);
+    disposeObject(this.model.group);
+    this.model.dispose?.();
   }
 }
 
@@ -974,7 +978,7 @@ export class Homing {
     this.mesh.lookAt(t.pos.x, ty, t.pos.z);
   }
   sync() { this.mesh.position.set(this.pos.x, this.pos.y, this.pos.z); }
-  dispose() { this.game.scene.remove(this.mesh); }
+  dispose() { this.game.scene.remove(this.mesh); disposeObject(this.mesh); }
 }
 
 // Снаряд по прямой: бьёт первого врага или всех на пути (pierce)
@@ -1014,7 +1018,7 @@ export class Skillshot {
     this.mesh.position.set(this.pos.x, this.pos.y, this.pos.z);
     if (!this.opts.arrow) this.mesh.rotation.x += 0.3;
   }
-  dispose() { this.game.scene.remove(this.mesh); }
+  dispose() { this.game.scene.remove(this.mesh); disposeObject(this.mesh); }
 }
 
 // Удар по области с задержкой и кругом-предупреждением
@@ -1054,13 +1058,12 @@ export class AreaStrike {
     this.disc.scale.setScalar(1 - k * 0.8);
   }
   dispose() {
-    this.game.scene.remove(this.ring, this.disc);
-    if (this.rock) this.game.scene.remove(this.rock);
+    for (const o of [this.ring, this.disc, this.rock]) if (o) { this.game.scene.remove(o); disposeObject(o); }
   }
 }
 
 // Вспышка: расширяющаяся и тающая сфера
-const burstGeo = new THREE.IcosahedronGeometry(1, 1);
+const burstGeo = markShared(new THREE.IcosahedronGeometry(1, 1)); // одна на все вспышки
 export class Burst {
   constructor(game, x, y, z, color, size, life = 0.35) {
     this.game = game;
@@ -1084,7 +1087,7 @@ export class Burst {
   }
   dispose() {
     this.game.scene.remove(this.mesh);
-    this.mesh.material.dispose();
+    disposeObject(this.mesh); // свой материал; общая геометрия вспышки остаётся
   }
 }
 
@@ -1114,7 +1117,11 @@ export class DeathAnim {
     this.group.position.y = k > 0.5 ? -(k - 0.5) * 3 : 0;
   }
   dispose() {
-    if (this.removeAfter) this.game.scene.remove(this.group);
-    else { this.group.visible = false; this.group.rotation.z = 0; this.group.position.y = 0; }
+    if (this.removeAfter) {
+      // крип или монстр погиб насовсем: модель больше не понадобится
+      this.game.scene.remove(this.group);
+      disposeObject(this.group);
+      this.model.dispose?.();
+    } else { this.group.visible = false; this.group.rotation.z = 0; this.group.position.y = 0; }
   }
 }

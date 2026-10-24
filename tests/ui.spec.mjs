@@ -22,6 +22,7 @@ const REASONS = [
 async function boot(test) {
   const t = await openGame({
     start: 'practiceBtn',
+    settings: test.settings,
     setup: async (ctx) => {
       if (test.fonts !== 'ok') await blockFonts(ctx);
       if (test.init) await ctx.addInitScript(test.init);
@@ -239,20 +240,85 @@ test('запасные модели собираются без robot.glb', asyn
   for (const x of r) check(!x.skeletal && x.parts >= 8 && x.orb && x.weapon, 'запасная модель неполная', x);
 });
 
-test('смена матчей не копит геометрию героев', async ({ page }) => {
+// --- ресурсы GPU между матчами ---------------------------------------------------------
+const frames = (page, n) => page.evaluate((n) => new Promise((ok) => { let k = 0; const f = () => (++k > n ? ok() : requestAnimationFrame(f)); requestAnimationFrame(f); }), n);
+const gpu = (page) => page.evaluate(() => { const r = window.dota3.renderer.info; return { tex: r.memory.textures, geo: r.memory.geometries }; });
+async function toMenu(page) {
+  await page.keyboard.press('Escape');
+  await page.waitForFunction(() => window.dota3.state === 'pause');
+  await page.evaluate(() => document.getElementById('quitBtn').click());
+  await page.waitForFunction(() => window.dota3.state === 'menu');
+}
+// скины игрока для всех трёх героев
+function equipSkins() {
+  localStorage.setItem('dota3-profile', JSON.stringify({ owned: { pyro: ['ice'], grok: ['gold'], lira: ['forest'] }, equipped: { pyro: 'ice', grok: 'gold', lira: 'forest' } }));
+}
+
+test('ресурсы GPU не растут от матча к матчу (3 на 3, все герои, скины, смерть)', async ({ page }) => {
+  await toMenu(page);
   await page.waitForFunction(() => window.dota3.game.player.model.mixer, null, { timeout: 30000 });
-  const counts = [];
-  for (let i = 0; i < 3; i++) {
-    await page.keyboard.press('Escape');
-    await page.waitForFunction(() => window.dota3.state === 'pause');
-    await page.evaluate(() => document.getElementById('quitBtn').click());
-    await page.waitForFunction(() => window.dota3.state === 'menu');
-    await page.evaluate(() => document.getElementById('practiceBtn').click());
+  const rows = [];
+  for (let i = 0; i < 7; i++) {
+    const hero = ['pyro', 'grok', 'lira'][i % 3];
+    await page.evaluate((h) => { document.getElementById(`hero-${h}`).checked = true; document.getElementById('playBtn').click(); }, hero);
     await page.waitForFunction(() => window.dota3.state === 'play');
-    await page.evaluate(() => new Promise((ok) => { let n = 0; const f = () => (++n > 5 ? ok() : requestAnimationFrame(f)); requestAnimationFrame(f); }));
-    counts.push(await page.evaluate(() => window.dota3.renderer.info.memory.geometries));
+    await page.evaluate(() => {
+      const g = window.dota3.game;
+      g.isVisible = () => true; // все шестеро рисуются: ленивые текстуры костей создаются в каждом матче
+      g.heroes[1][0].takeDamage(1e6, 'true', null); // смерть и возрождение
+    });
+    for (let k = 0; k < 16; k++) { await page.evaluate(() => window.dota3.simulate(0.5)); await frames(page, 1); }
+    const match = await gpu(page);
+    const ok = await page.evaluate(() => window.dota3.game.allHeroes.every((h) => h.model.mixer && h.model.group.children.length > 2));
+    await toMenu(page);
+    await frames(page, 10); // меню с фоновым матчем отрисовано
+    rows.push({ hero, ok, match, menu: await gpu(page) });
   }
-  check(counts.every((c) => c === counts[0]), 'число геометрий растёт от матча к матчу', counts);
-});
+  check(rows.every((r) => r.ok), 'у героя пропала модель-робот', rows);
+  // Первые два цикла — прогрев. Дальше в равных состояниях текстуры не растут вовсе:
+  // каждая текстура костей и карта теней принадлежат одному матчу и уходят вместе с ним.
+  // Геометрия в меню зависит от пары героев фонового матча (случайный противник): разброс
+  // по деталям героев до ~25 единиц, но не рост.
+  const warm = rows.slice(0, 2), later = rows.slice(2);
+  const max = (xs) => Math.max(...xs);
+  check(max(later.map((r) => r.menu.tex)) <= max(warm.map((r) => r.menu.tex)), 'текстуры в меню растут от цикла к циклу', rows);
+  check(max(later.map((r) => r.match.tex)) <= max(warm.map((r) => r.match.tex)), 'текстуры в матче растут от цикла к циклу', rows);
+  check(max(later.map((r) => r.menu.geo)) <= max(warm.map((r) => r.menu.geo)) + 25, 'геометрия в меню растёт от цикла к циклу', rows);
+}, { settings: { quality: 'medium', mode: '3v3' }, init: equipSkins });
+
+test('долгий матч не копит геометрию погибших крипов, снарядов и эффектов', async ({ page }) => {
+  await toMenu(page);
+  await page.evaluate(() => document.getElementById('playBtn').click());
+  await page.waitForFunction(() => window.dota3.state === 'play');
+  await page.evaluate(() => { window.dota3.game.isVisible = () => true; });
+  const pts = [];
+  for (let k = 0; k < 240; k++) {
+    await page.evaluate(() => window.dota3.simulate(0.5));
+    if (k % 2 === 0) await frames(page, 1);
+    if (k % 20 === 19) pts.push({ t: (k + 1) / 2, ...(await gpu(page)), units: await page.evaluate(() => window.dota3.game.units.length) });
+  }
+  // Число объектов на карте колеблется вместе с волнами; без утечки геометрия идёт за ним,
+  // а не растёт со временем. До исправления за 2 минуты рост был больше чем в полтора раза.
+  const early = Math.max(...pts.filter((p) => p.t <= 50).map((p) => p.geo));
+  const late = Math.max(...pts.filter((p) => p.t >= 80).map((p) => p.geo));
+  check(late <= early * 1.3, 'геометрия растёт со временем матча', pts);
+}, { settings: { quality: 'low', mode: '3v3' } });
+
+test('запасные модели: ресурсы не растут от матча к матчу', async ({ page }) => {
+  await toMenu(page);
+  const rows = [];
+  for (let i = 0; i < 4; i++) {
+    await page.evaluate((h) => { document.getElementById(`hero-${h}`).checked = true; document.getElementById('playBtn').click(); }, ['pyro', 'grok', 'lira', 'pyro'][i]);
+    await page.waitForFunction(() => window.dota3.state === 'play');
+    await page.evaluate(() => { window.dota3.game.isVisible = () => true; });
+    for (let k = 0; k < 10; k++) { await page.evaluate(() => window.dota3.simulate(0.5)); await frames(page, 1); }
+    const fallback = await page.evaluate(() => window.dota3.game.allHeroes.every((h) => !h.model.mixer));
+    await toMenu(page);
+    await frames(page, 10);
+    rows.push({ fallback, menu: await gpu(page) });
+  }
+  check(rows.every((r) => r.fallback), 'ожидались запасные модели', rows);
+  check(rows.every((r) => r.menu.tex === rows[0].menu.tex), 'текстуры растут (карты теней старых матчей)', rows);
+}, { settings: { quality: 'medium', mode: '3v3' }, init: () => { window.ROBOT_URL = 'missing-robot.glb'; } });
 
 await run(tests, boot);

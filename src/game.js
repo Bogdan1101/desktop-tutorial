@@ -459,6 +459,12 @@ export class Game {
     }
   }
 
+  // Матч заменён: модели освобождают то, что не видно при обходе сцены, — скелеты и анимации
+  // героев. Геометрию и материалы всей сцены освобождает main.js (disposeObject(scene)).
+  dispose() {
+    for (const u of new Set([...this.units, ...this.allHeroes])) u.model?.dispose?.();
+  }
+
   syncMeshes(dt = 0) {
     const p = this.player;
     for (const pl of this.plants) if (pl.model.group.visible) pl.model.fruit.rotation.y += dt * 2;

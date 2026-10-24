@@ -7,7 +7,7 @@ import { Input } from './input.js';
 import { Sound } from './audio.js';
 import { FogOverlay, AimIndicator, TargetMarker } from './overlays.js';
 import { loadSettings, saveSettings } from './settings.js';
-import { loadRobot } from './models.js';
+import { loadRobot, disposeObject } from './models.js';
 import { Tutorial } from './tutorial.js';
 import {
   loadProfile, recordMatch, claimQuest, questDef, finishTutorial, buySkin, equipSkin, ownsSkin, equippedSkin, TUTORIAL_REWARD,
@@ -61,10 +61,12 @@ function resize() {
 }
 addEventListener('resize', resize);
 
+// Старый матч: каждый владелец освобождает своё ровно один раз
 function disposeScene(s) {
-  s.traverse((o) => { if (o.geometry) o.geometry.dispose(); });
-  fog?.dispose();
-  marker?.dispose();
+  game?.dispose();   // скелеты и анимации героев
+  fog?.dispose();    // текстура тумана
+  marker?.dispose(); // маркер цели: освобождает себя и уходит со сцены
+  disposeObject(s);  // остальное в сцене; общие ресурсы помечены shared и остаются
 }
 
 // Короткая вибрация (на телефонах с Android; где не поддерживается — молчит)

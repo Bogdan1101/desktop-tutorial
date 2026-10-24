@@ -5,6 +5,29 @@ import { clone as cloneSkinned } from '../vendor/SkeletonUtils.js';
 import { mergeGeometries } from '../vendor/BufferGeometryUtils.js';
 import { TEAM_COLOR, TEAM_GLOW, SKINS } from './config.js';
 
+// Владение ресурсами GPU. Объект, убранный со сцены, ещё держит буферы и текстуры на видеокарте:
+// их освобождает disposeObject. Общие ресурсы (кэш материалов, геометрия robot.glb, общие
+// заготовки эффектов) помечены как shared: ими пользуются другие модели и следующие матчи.
+export function markShared(res) {
+  res.userData.shared = true;
+  return res;
+}
+
+// Освобождает то, чем владеет дерево объектов: свои геометрии и материалы (каждый один раз),
+// буферы экземпляров InstancedMesh и карты теней источников света. Текстуры материалов
+// не трогает: ими владеет тот, кто их создал (например, туман). Скелеты и анимации моделей
+// героев освобождает model.dispose().
+export function disposeObject(root) {
+  const geos = new Set(), mats = new Set();
+  root.traverse((o) => {
+    if (o.geometry && !o.geometry.userData.shared) geos.add(o.geometry);
+    if (o.material) for (const m of Array.isArray(o.material) ? o.material : [o.material]) if (!m.userData.shared) mats.add(m);
+    if (o.isInstancedMesh || o.isLight) o.dispose();
+  });
+  for (const g of geos) g.dispose();
+  for (const m of mats) m.dispose();
+}
+
 const matCache = new Map();
 export function mat(color, opts = {}) {
   const key = color + JSON.stringify(opts);
@@ -12,7 +35,7 @@ export function mat(color, opts = {}) {
     const m = opts.glow
       ? new THREE.MeshBasicMaterial({ color, transparent: !!opts.opacity, opacity: opts.opacity ?? 1 })
       : new THREE.MeshLambertMaterial({ color, flatShading: true, emissive: opts.emissive ?? 0x000000 });
-    matCache.set(key, m);
+    matCache.set(key, markShared(m));
   }
   return matCache.get(key);
 }
@@ -136,6 +159,8 @@ let robot = null;
 
 export async function loadRobot(url) {
   const gltf = await new GLTFLoader().loadAsync(url);
+  // геометрию робота делят все копии героев (clone не копирует буферы): её не освобождаем
+  gltf.scene.traverse((o) => { if (o.geometry) markShared(o.geometry); });
   const box = new THREE.Box3().setFromObject(gltf.scene);
   robot = { scene: gltf.scene, clips: gltf.animations, height: box.max.y - box.min.y };
   return robot;
@@ -271,6 +296,9 @@ function robotHero(team, heroId, colors) {
     orb = mesh(new THREE.OctahedronGeometry(0.12), mat(0xfff1a8, { glow: true }), 0, 1.4, 0.5, false);
     unit.add(orb);
   }
+  // Скелеты копии (по одному на каждую SkinnedMesh) держат на GPU текстуру костей
+  const skeletons = new Set();
+  root.traverse((o) => { if (o.isSkinnedMesh) skeletons.add(o.skeleton); });
   const tmp = new THREE.Vector3();
   const update = () => {
     for (const h of held) {
@@ -302,7 +330,14 @@ function robotHero(team, heroId, colors) {
     current = name;
   };
   play('Idle');
-  return { group: g, orb, weapon: unit, mixer, play, update, skeletal: true };
+  // Модель больше не нужна: анимации остановлены и забыты, текстуры костей освобождены.
+  // Геометрию и материалы освобождает disposeObject вместе с остальной сценой.
+  const dispose = () => {
+    mixer.stopAllAction();
+    mixer.uncacheRoot(root);
+    for (const s of skeletons) s.dispose();
+  };
+  return { group: g, orb, weapon: unit, mixer, play, update, dispose, skeletal: true };
 }
 
 export function heroModel(team, heroId, skinId = 'base') {

@@ -284,6 +284,38 @@ for (const name of ['потеря фокуса окна', 'пауза']) {
   });
 }
 
+// --- долгий кадр: событие случилось рано, а дошло после таймера удержания -------------
+// Событие создаётся сразу (его timeStamp ранний), а отправляется через 600 мс — так браузер
+// ведёт себя, когда кадр рисуется дольше порога удержания 450 мс.
+async function lateGesture(t, kind) {
+  await t.page.evaluate(async ([q, kind]) => {
+    const btn = document.getElementById('abQ');
+    const opts = (x, y) => ({ pointerId: 77, pointerType: 'touch', isPrimary: true, bubbles: true, clientX: x, clientY: y });
+    btn.dispatchEvent(new PointerEvent('pointerdown', opts(q.x, q.y)));
+    const early = kind === 'drag'
+      ? [new PointerEvent('pointermove', opts(q.x - 40, q.y - 5)), new PointerEvent('pointermove', opts(q.x - 80, q.y - 10))]
+      : [];
+    const up = new PointerEvent('pointerup', opts(kind === 'drag' ? q.x - 80 : q.x, kind === 'drag' ? q.y - 10 : q.y));
+    await new Promise((r) => setTimeout(r, 600)); // таймер удержания уже сработал
+    for (const e of early) btn.dispatchEvent(e);
+    btn.dispatchEvent(up);
+  }, [t.q, kind]);
+  await t.frames();
+  return t.snap();
+}
+
+test('долгий кадр: ранний свайп остаётся прицелом', async (t) => {
+  const s = await lateGesture(t, 'drag');
+  check(s.casted.Q === 1 && s.manual === 1, 'свайп, случившийся до порога, принят за удержание', s);
+  check(clean(s), 'остались следы жеста', s);
+});
+
+test('долгий кадр: ранний тап остаётся тапом', async (t) => {
+  const s = await lateGesture(t, 'tap');
+  check(s.casted.Q === 1 && s.manual === 0, 'тап, случившийся до порога, принят за удержание', s);
+  check(clean(s), 'остались следы жеста', s);
+});
+
 // --- мультитач: кто владеет жестом ------------------------------------------------------
 const P = (pt, id) => ({ x: pt.x, y: pt.y, id });
 const off = (pt, dx, dy = 0) => ({ x: pt.x + dx, y: pt.y + dy });

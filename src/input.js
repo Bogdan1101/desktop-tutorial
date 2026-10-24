@@ -142,7 +142,25 @@ export class Input {
   }
 
   // --- умения: тап, прицел, отмена, удержание для описания ----------------------------
+  // Тап, перетаскивание или удержание определяются по времени самих событий (event.timeStamp),
+  // а не по моменту их обработки: браузер выдаёт pointermove только к следующему кадру, и при
+  // долгом кадре таймер удержания может сработать раньше, чем дойдёт уже случившееся движение.
   bindAbility(btn, key) {
+    const beginAim = () => {
+      const mode = this.aimModes[key];
+      if (mode && mode !== 'self') {
+        this.aiming = { key, dx: 0, dz: 0, mag: 0, manual: false };
+        this.cancelEl.hidden = false;
+      }
+    };
+    // когда палец впервые вышел за мёртвую зону (с учётом слитых браузером промежуточных событий)
+    const leftDeadzoneAt = (e, g) => {
+      const samples = e.getCoalescedEvents?.() ?? [];
+      for (const c of samples.length ? samples : [e]) {
+        if (Math.hypot(c.clientX - g.x, c.clientY - g.y) > AIM_DEADZONE) return c.timeStamp;
+      }
+      return e.timeStamp;
+    };
     const clear = (g) => {
       clearTimeout(g.timer);
       btn.classList.remove('held');
@@ -159,7 +177,9 @@ export class Input {
         btn.classList.add('held');
         g.x = e.clientX;
         g.y = e.clientY;
+        g.t0 = e.timeStamp;
         g.tip = false;
+        g.moved = false;
         // удержание на месте — показать описание; отпускание после этого умение не применяет
         g.timer = setTimeout(() => {
           if (this.gestures.get('ability') !== g || this.aiming?.manual) return;
@@ -167,17 +187,22 @@ export class Input {
           this.tipKey = key;
           if (this.aiming?.key === key) { this.aiming = null; this.cancelEl.hidden = true; }
         }, TIP_DELAY);
-        const mode = this.aimModes[key];
-        if (mode && mode !== 'self') {
-          this.aiming = { key, dx: 0, dz: 0, mag: 0, manual: false };
-          this.cancelEl.hidden = false;
-        }
+        beginAim();
       },
       move: (e, g) => {
-        if (g.tip) return;
         const dx = e.clientX - g.x, dy = e.clientY - g.y;
         const d = Math.hypot(dx, dy);
-        if (d > AIM_DEADZONE) clearTimeout(g.timer);
+        if (d > AIM_DEADZONE && !g.moved) {
+          g.moved = true;
+          clearTimeout(g.timer);
+          // описание показалось по таймеру, но палец начал двигаться раньше порога — это перетаскивание
+          if (g.tip && leftDeadzoneAt(e, g) - g.t0 < TIP_DELAY) {
+            g.tip = false;
+            if (this.tipKey === key) this.tipKey = null;
+            beginAim();
+          }
+        }
+        if (g.tip) return;
         if (this.aiming?.key !== key) return;
         if (d > AIM_DEADZONE) {
           this.aiming.manual = true;
@@ -189,6 +214,8 @@ export class Input {
         this.cancelEl.classList.toggle('hot', this.cancelHover);
       },
       end: (e, g) => {
+        // отпустили раньше порога, а таймер просто не успели обработать вовремя — это тап
+        if (g.tip && !g.moved && e.timeStamp - g.t0 < TIP_DELAY) g.tip = false;
         const a = this.aiming?.key === key ? this.aiming : null;
         const cancelled = g.tip || (a && this.cancelHover);
         if (!cancelled) {

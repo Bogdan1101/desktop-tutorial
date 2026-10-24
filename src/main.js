@@ -149,6 +149,8 @@ function buildMenu() {
   const check = (name, value) => { const el = document.querySelector(`input[name="${name}"][value="${value}"]`); if (el) el.checked = true; };
   check('mode', settings.mode);
   check('diff', settings.difficulty);
+  $('matchSetup').addEventListener('change', updateSetupSummary);
+  updateSetupSummary();
   check('quality', settings.quality);
   $('setSfx').value = settings.sfx;
   $('setMusic').value = settings.music;
@@ -160,6 +162,18 @@ function buildMenu() {
 function updateGems() {
   $('menuGems').textContent = profile.crystals;
   $('profGems').textContent = profile.crystals;
+  // новичку обучение предлагается заметно и с наградой; дальше это обычная кнопка
+  $('tutorialBtn').classList.toggle('recommended', !profile.tutorialDone);
+  $('tutorialReward').hidden = profile.tutorialDone;
+  $('tutorialReward').textContent = `+${TUTORIAL_REWARD} кристаллов`;
+}
+
+// Краткая строка выбранной настройки матча: видно, с чем начнётся игра, не раскрывая блок
+function updateSetupSummary() {
+  const talent = document.querySelector('input[name="talent"]:checked')?.value;
+  const diff = document.querySelector('input[name="diff"]:checked');
+  const spells = settings.spells.map((id) => SPELLS[id]?.name).filter(Boolean).join(' + ');
+  $('setupSummary').textContent = [TALENTS[talent]?.name, spells, diff?.nextElementSibling.textContent].filter(Boolean).join(' · ');
 }
 
 function bindSettings() {
@@ -263,6 +277,9 @@ function renderProfile() {
 
 // --- матч -------------------------------------------------------------------------
 function newMatch(opts = {}) {
+  // обучение старого матча: снять подсветку, метки и обработчики до освобождения сцены
+  tutorial?.dispose();
+  tutorial = null;
   if (scene) disposeScene(scene);
   if (hud) hud.dispose();
   scene = new THREE.Scene();
@@ -287,10 +304,8 @@ function newMatch(opts = {}) {
   game.on('gameover', (winner) => setTimeout(() => showEnd(winner), 2200));
   camTarget.set(p.pos.x + 6, 0, p.pos.z);
   $('practicePanel').hidden = game.mode !== 'practice' || !!opts.tutorial;
-  $('tutorialBox').hidden = true;
-  tutorial = null;
   // для автотестов: состояние матча, ввода и экрана
-  window.dota3 = { game, simulate, input, hud, marker, renderer, get state() { return state; } };
+  window.dota3 = { game, simulate, input, hud, marker, renderer, get state() { return state; }, get tutorial() { return tutorial; } };
 }
 
 function bindEvents(g) {
@@ -353,11 +368,16 @@ function startGame(opts = {}) {
   sound.play('click');
   newMatch(opts);
   if (opts.tutorial) {
-    tutorial = new Tutorial(game, $('tutorialBox'), () => {
-      if (finishTutorial(profile)) hud.banner(`Обучение пройдено: +${TUTORIAL_REWARD} кристаллов`);
-      else hud.banner('Обучение пройдено');
+    tutorial = new Tutorial(game, $('tutorialBox'), { scene, camera }, () => {
+      // награда — один раз на профиль; сообщение о ней в окне завершения, без отдельного баннера
+      const first = finishTutorial(profile);
       sound.play('levelup');
       updateGems();
+      return first ? `Обучение пройдено: +${TUTORIAL_REWARD} кристаллов` : 'Обучение пройдено';
+    }, {
+      // первый матч тем же героем; сохранённый режим (например, 3 на 3) не меняется
+      onMatch: () => startGame({ mode: '1v1' }),
+      onStay: () => { $('practicePanel').hidden = false; },
     });
   }
   $('menu').hidden = true;
@@ -495,7 +515,7 @@ function frame(now) {
   if (state === 'play') {
     applyPlayerInput();
     if (state === 'play') game.update(dt);
-    tutorial?.update();
+    tutorial?.update(dt);
   }
   game.syncMeshes(state === 'pause' ? 0 : dt);
   const p = game.player;

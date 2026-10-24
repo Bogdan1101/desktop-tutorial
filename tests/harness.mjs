@@ -24,28 +24,32 @@ const browser = await chromium.launch({
 });
 
 // Открывает игру в мобильном горизонтальном окне и запускает матч.
-// start — id кнопки меню: 'playBtn' (матч 1 на 1) или 'practiceBtn' (тренировка с манекенами).
+// start — id кнопки меню: 'playBtn' (матч 1 на 1) или 'practiceBtn' (тренировка с манекенами);
+// null — остаться в меню. profile — сохранённый профиль игрока. contextOptions — добавка к настройкам окна (например, reducedMotion).
 // viewport — размер окна; settings — добавка к сохранённым настройкам;
 // setup(ctx) — до загрузки страницы, например чтобы перехватить запросы.
-export async function openGame({ start = 'playBtn', viewport = { width: 844, height: 390 }, settings = {}, setup } = {}) {
-  const ctx = await browser.newContext({ viewport, hasTouch: true, isMobile: true });
+export async function openGame({ start = 'playBtn', viewport = { width: 844, height: 390 }, settings = {}, profile = null, setup, contextOptions = {} } = {}) {
+  const ctx = await browser.newContext({ viewport, hasTouch: true, isMobile: true, ...contextOptions });
   if (setup) await setup(ctx);
   // низкое качество графики: программный рендер в тестах медленный, а жесты чувствительны ко времени
-  await ctx.addInitScript((extra) => {
+  await ctx.addInitScript(([extra, profile]) => {
     if (!sessionStorage.getItem('test-init')) {
       sessionStorage.setItem('test-init', '1');
       localStorage.clear();
       localStorage.setItem('dota3-settings', JSON.stringify({ quality: 'low', mode: '1v1', vibration: false, ...extra }));
+      if (profile) localStorage.setItem('dota3-profile', JSON.stringify(profile));
     }
-  }, settings);
+  }, [settings, profile]);
   const page = await ctx.newPage();
   const errors = [];
   page.on('pageerror', (e) => errors.push(e.message));
   // ускоряем время, чтобы проверки не ждали медленный программный рендер
   await page.goto(BASE + '?speed=3');
   await page.waitForFunction(() => window.dota3?.game);
-  await page.evaluate((id) => document.getElementById(id).click(), start);
-  await page.waitForFunction(() => window.dota3.state === 'play');
+  if (start) {
+    await page.evaluate((id) => document.getElementById(id).click(), start);
+    await page.waitForFunction(() => window.dota3.state === 'play');
+  }
   const cdp = await ctx.newCDPSession(page);
   return {
     page, ctx, errors,

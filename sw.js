@@ -1,5 +1,5 @@
 // Кэширует игру, чтобы она открывалась без интернета. При изменении файлов увеличьте VERSION.
-const VERSION = 'dota3-v14';
+const VERSION = 'dota3-v15';
 const FILES = [
   './', 'index.html', 'style.css', 'manifest.webmanifest', 'icons/icon.svg', 'icons/icon-192.png', 'icons/icon-512.png',
   'vendor/three.module.min.js', 'src/main.js', 'src/config.js', 'src/world.js', 'src/models.js', 'src/units.js',

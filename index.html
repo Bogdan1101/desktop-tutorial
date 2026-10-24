@@ -92,7 +92,14 @@
     <button class="util quick" data-act="quickbuy" id="quickBtn" hidden></button>
   </div>
 
-  <div id="tutorialBox" hidden><b></b><span></span></div>
+  <div id="tutorialBox" hidden>
+    <b></b><span></span>
+    <em class="tut-dir" id="tutDir" hidden><i aria-hidden="true">➜</i> <small></small></em>
+    <div class="tut-done" id="tutDone" hidden>
+      <button class="play" id="tutMatchBtn">Начать матч 1 на 1</button>
+      <button class="ghost" id="tutStayBtn">Потренироваться ещё</button>
+    </div>
+  </div>
 
   <div id="practicePanel" hidden>
     <button class="util" data-act="pr-level">+1 уровень</button>
@@ -153,26 +160,34 @@
 <div id="menu" class="screen">
   <div class="menu-card wide">
     <h1>Дота <span>3</span></h1>
-    <div class="seg" role="radiogroup" aria-label="Режим">
-      <label><input type="radio" name="mode" id="mode1" value="1v1"><span>1 на 1</span></label>
-      <label><input type="radio" name="mode" id="mode3" value="3v3"><span>3 на 3</span></label>
-    </div>
     <div class="heroes" id="heroCards" role="radiogroup" aria-label="Герой"></div>
-    <div class="seg" role="radiogroup" aria-label="Талант" id="talents"><span>Талант</span></div>
-    <p class="tag small" id="talentDesc"></p>
-    <div class="seg" role="group" aria-label="Заклинания" id="spellPick"><span>Заклинания (2)</span></div>
-    <div class="seg" role="radiogroup" aria-label="Сложность ботов">
-      <label><input type="radio" name="diff" id="diffEasy" value="easy"><span>Легко</span></label>
-      <label><input type="radio" name="diff" id="diffNormal" value="normal"><span>Нормально</span></label>
-      <label><input type="radio" name="diff" id="diffHard" value="hard"><span>Сложно</span></label>
+    <div class="menu-main">
+      <div class="seg" role="radiogroup" aria-label="Режим">
+        <label><input type="radio" name="mode" id="mode1" value="1v1"><span>1 на 1</span></label>
+        <label><input type="radio" name="mode" id="mode3" value="3v3"><span>3 на 3</span></label>
+      </div>
+      <button class="play" id="playBtn">Играть</button>
+      <button class="ghost tut-entry" id="tutorialBtn">Обучение <small id="tutorialReward" hidden></small></button>
     </div>
     <div class="menu-buttons">
-      <button class="play" id="playBtn">Играть</button>
       <button class="ghost" id="practiceBtn">Тренировка</button>
-      <button class="ghost" id="tutorialBtn">Обучение</button>
       <button class="ghost" id="profileBtn">Профиль <span class="gem" id="menuGems">0</span></button>
       <button class="ghost" id="settingsBtn">Настройки</button>
     </div>
+    <details class="setup" id="matchSetup">
+      <summary>Настройка матча: <span id="setupSummary"></span></summary>
+      <div class="setup-body">
+        <div class="seg" role="radiogroup" aria-label="Талант" id="talents"><span>Талант</span></div>
+        <p class="tag small" id="talentDesc"></p>
+        <div class="seg" role="group" aria-label="Заклинания" id="spellPick"><span>Заклинания (2)</span></div>
+        <div class="seg" role="radiogroup" aria-label="Сложность ботов" id="diffPick">
+          <span>Сложность</span>
+          <label><input type="radio" name="diff" id="diffEasy" value="easy"><span>Легко</span></label>
+          <label><input type="radio" name="diff" id="diffNormal" value="normal"><span>Нормально</span></label>
+          <label><input type="radio" name="diff" id="diffHard" value="hard"><span>Сложно</span></label>
+        </div>
+      </div>
+    </details>
     <details class="howto">
       <summary>Как играть</summary>
       <ul>

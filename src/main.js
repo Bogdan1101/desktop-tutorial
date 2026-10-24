@@ -491,6 +491,7 @@ function frame(now) {
     hud.update(state === 'play' ? dt : 0);
     fog.update(game, p.team, dt);
     aim.update(p, input.aiming, input.cancelHover);
+    hud.setTip(state === 'play' ? input.tipKey : null);
   }
   sound.listener = p.pos;
 

@@ -335,3 +335,23 @@ button:focus-visible { outline: 2px solid var(--gold); outline-offset: 2px; }
 .skin-row button:disabled { opacity: 0.45; cursor: default; }
 .settings input[type="checkbox"] { width: 22px; height: 22px; accent-color: var(--gold); justify-self: start; }
 @media (max-width: 560px) { .skins { grid-template-columns: 1fr; } }
+
+/* --- описание умения по удержанию кнопки --- */
+#skillTip {
+  position: absolute; right: calc(16px + var(--sr)); top: calc(70px + var(--st)); width: min(300px, 46vw); max-height: calc(100% - 90px); overflow: auto;
+  background: rgba(16, 22, 27, 0.96); border: 1px solid var(--gold); border-radius: 12px; padding: 10px 12px;
+  display: grid; gap: 5px; box-shadow: 0 8px 24px rgba(0, 0, 0, 0.55); font-size: 12px; line-height: 1.35;
+  z-index: 5; overflow-wrap: anywhere;
+}
+#skillTip header { display: flex; align-items: baseline; gap: 8px; }
+#skillTip h4 { margin: 0; font: 800 14px var(--font-display); flex: 1; }
+#skillTip .key { font: 800 11px var(--font-display); color: var(--gold); }
+#skillTip .tip-rank { color: var(--muted); font-size: 11px; }
+#skillTip .stats { display: flex; flex-wrap: wrap; gap: 4px 10px; font-variant-numeric: tabular-nums; }
+#skillTip .stats span { min-width: 0; overflow-wrap: anywhere; }
+#skillTip .stats .cd { color: #b9c6d2; }
+#skillTip .stats .mana { color: #7fb2ff; }
+#skillTip .stats .magic { color: var(--magic); }
+#skillTip .stats .phys { color: #ffb36b; }
+#skillTip .fx { color: #9fe8ff; }
+#skillTip .next { color: var(--muted); font-size: 11px; border-top: 1px solid rgba(255, 255, 255, 0.08); padding-top: 5px; }

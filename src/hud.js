@@ -57,6 +57,9 @@ export class Hud {
 
     $('shopClose').onclick = () => this.toggleShop(false);
     this.el.shop.onpointerdown = (e) => { if (e.target === this.el.shop) this.toggleShop(false); };
+    this.tipEl = $('skillTip');
+    this.tipEl.hidden = true;
+    this.tipKey = null;
     $('scoreClose').onclick = () => this.toggleScore(false);
 
     game.on('float', ({ unit, text }) => { if (unit === game.player) this.addFloat(unit, text, 'gold'); });
@@ -148,6 +151,14 @@ export class Hud {
       s.textContent = p.items[i] ? ITEMS[p.items[i]].name : '';
       slots.append(s);
     }
+  }
+
+  // --- описание умения (зажать кнопку) ---
+  setTip(key) {
+    if (key === this.tipKey) return;
+    this.tipKey = key;
+    this.tipEl.hidden = !key;
+    if (key) this.tipEl.replaceChildren(...(key[0] === 'S' ? spellTip(this.game.player, key) : abilityTip(this.game.player, key)));
   }
 
   // --- таблица счёта ---
@@ -423,4 +434,106 @@ export function scoreTable(game) {
     wrap.append(h3, table);
   }
   return wrap;
+}
+
+// --- Тексты описаний -------------------------------------------------------------
+const num = (v) => String(Math.round(v * 10) / 10).replace('.', ',');
+const pct = (v) => `${Math.round(v * 100)}%`;
+const sentence = (parts) => { const t = parts.join('; ') + '.'; return t[0].toUpperCase() + t.slice(1); };
+
+function el(tag, cls, text) {
+  const e = document.createElement(tag);
+  if (cls) e.className = cls;
+  if (text !== undefined) e.textContent = text;
+  return e;
+}
+
+function tipHeader(name, key, rankText) {
+  const h = el('header');
+  h.append(el('h4', '', name), el('span', 'key', key));
+  return [h, el('div', 'tip-rank', rankText)];
+}
+
+// Урон умения на ранге r с учётом характеристик героя
+function abilityDamage(p, def, r) {
+  let v = def.damage[r - 1];
+  if (def.ap) v += p.ap * def.ap;
+  if (def.adRatio) v += p.ad * def.adRatio;
+  if (def.hpRatio) v += p.maxHp * def.hpRatio;
+  return v * p.outMul;
+}
+
+function scalingText(def) {
+  const parts = [];
+  if (def.ap) parts.push(`${pct(def.ap)} силы умений`);
+  if (def.adRatio) parts.push(`${pct(def.adRatio)} урона`);
+  if (def.hpRatio) parts.push(`${pct(def.hpRatio)} макс. здоровья`);
+  return parts.length ? ` + ${parts.join(' + ')}` : '';
+}
+
+function effectsText(def, i) {
+  const fx = [];
+  if (def.slow) fx.push(`замедляет на ${pct(def.slow)} на ${num(def.slowTime)} с`);
+  if (def.stun) fx.push(`оглушает на ${num(def.stun)} с`);
+  if (def.knockback) fx.push(`отбрасывает на ${num(def.knockback)} м`);
+  if (def.shield) fx.push(`щит ${def.shield[i]}${def.ap ? ` + ${pct(def.ap)} силы умений` : ''} на ${num(def.duration)} с`);
+  if (def.resist) fx.push(`+${def.resist[i]} брони и сопр. магии на ${num(def.duration)} с`);
+  if (def.hpShield) fx.push(`щит ${pct(def.hpShield)} макс. здоровья`);
+  if (def.attackSpeed) fx.push(`+${pct(def.attackSpeed[i])} скорости атаки на ${num(def.duration)} с`);
+  if (def.empower) fx.push(`следующая атака сильнее на ${pct(def.empower[i])}`);
+  if (def.pierce) fx.push('пробивает всех на пути');
+  if (def.heroOnly) fx.push('летит сквозь крипов, бьёт только героев');
+  if (def.delay) fx.push(`срабатывает через ${num(def.delay)} с`);
+  return fx;
+}
+
+export function abilityTip(p, key) {
+  const def = p.ability(key);
+  const r = p.ranks[key];
+  const max = def.ult ? HERO.ultLevels.length : HERO.basicMaxRank;
+  const i = Math.max(0, r - 1);
+  let rankText = r ? `Ранг ${r} из ${max}` : 'Не изучено';
+  if (!r && def.ult) rankText += `. Открывается на ${HERO.ultLevels[0]} уровне`;
+  const out = tipHeader(def.name, key, rankText);
+  out.push(el('div', '', def.desc));
+  const stats = el('div', 'stats');
+  stats.append(el('span', 'cd', `Перезарядка ${num(def.cooldown[i] * (1 - p.cdr))} с`), el('span', 'mana', `Мана ${def.mana[i]}`));
+  if (def.range) stats.append(el('span', '', `Дальность ${num(def.range)} м`));
+  if (def.radius) stats.append(el('span', '', `Радиус ${num(def.radius)} м`));
+  out.push(stats);
+  if (def.damage) {
+    const type = def.type === 'magic' ? 'магический' : 'физический';
+    const line = el('div', 'stats');
+    line.append(el('span', def.type === 'magic' ? 'magic' : 'phys',
+      `Урон ${def.damage[i]}${scalingText(def)} (${type}), сейчас ≈ ${Math.round(abilityDamage(p, def, i + 1))}`));
+    out.push(line);
+  }
+  const fx = effectsText(def, i);
+  if (fx.length) out.push(el('div', 'fx', sentence(fx)));
+  if (r < max) {
+    const n = r; // индекс следующего ранга
+    const next = [`перезарядка ${num(def.cooldown[n])} с`];
+    if (def.damage) next.unshift(`урон ${def.damage[n]}`);
+    if (def.shield) next.push(`щит ${def.shield[n]}`);
+    if (def.resist) next.push(`броня ${def.resist[n]}`);
+    if (def.attackSpeed) next.push(`скорость атаки +${pct(def.attackSpeed[n])}`);
+    if (def.empower) next.push(`усиление ${pct(def.empower[n])}`);
+    out.push(el('div', 'next', `${r ? 'Следующий ранг' : 'Ранг 1'}: ${next.join(', ')}`));
+  }
+  out.push(el('div', 'next', 'Отпустите — умение не применится. Касание применяет сразу, перетаскивание — с прицелом.'));
+  return out;
+}
+
+export function spellTip(p, key) {
+  const id = p.spells[+key[1] - 1];
+  const def = SPELLS[id];
+  const out = tipHeader(def.name, 'Заклинание', `Перезарядка ${def.cooldown} с`);
+  out.push(el('div', '', def.desc));
+  const v = [];
+  if (def.heal) v.push(`лечит на ${def.heal(p.level)} сейчас`);
+  if (def.shield) v.push(`щит ${def.shield(p.level)} сейчас`);
+  if (def.damage) v.push(`${def.damage(p.level)} чистого урона за ${def.duration} с, дальность ${num(def.range)} м`);
+  if (def.distance) v.push('можно потянуть, чтобы выбрать направление');
+  if (v.length) out.push(el('div', 'fx', sentence(v)));
+  return out;
 }

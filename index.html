@@ -1,0 +1,223 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
+<meta name="theme-color" content="#0d1216">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<title>Дота 3</title>
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="icon" href="icons/icon.svg" type="image/svg+xml">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Rubik:wght@400;500;700&family=Unbounded:wght@600;800&display=swap">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<!-- GAME:BEGIN -->
+<div id="err" hidden></div>
+<script>
+  // Показывает ошибку на экране: так видно, что сломалось, даже на телефоне без консоли
+  (function () {
+    function show(msg) {
+      var el = document.getElementById('err');
+      if (!el) return;
+      el.hidden = false;
+      el.textContent = (el.textContent ? el.textContent + '\n' : 'Ошибка: ') + msg;
+    }
+    addEventListener('error', function (e) { show(e.message || (e.target && e.target.src ? 'не загрузился ' + e.target.src : 'неизвестная')); }, true);
+    addEventListener('unhandledrejection', function (e) { show(String(e.reason && e.reason.message || e.reason)); });
+  })();
+</script>
+<canvas id="scene"></canvas>
+
+<div id="hud" hidden>
+  <div id="vignette"></div>
+  <div id="bars"></div>
+  <div id="floaters"></div>
+  <div id="banner" hidden></div>
+
+  <div class="top">
+    <div class="me">
+      <div class="portrait"><span id="portraitLetter">П</span><b id="lvl">1</b></div>
+      <div class="me-bars">
+        <div class="bar hp"><i id="hpFill"></i><span id="hpText">0 / 0</span></div>
+        <div class="bar mp"><i id="mpFill"></i><span id="mpText">0 / 0</span></div>
+        <div class="bar xp"><i id="xpFill"></i></div>
+        <div class="me-row"><span class="gold" id="gold">500</span><span class="buffs" id="buffs"></span></div>
+      </div>
+    </div>
+    <div class="center-top">
+      <button class="mini-act score-btn" data-act="score" aria-label="Таблица счёта">
+        <span class="k blue" id="killsBlue">0</span><span class="clock" id="clock">0:00</span><span class="k red" id="killsRed">0</span>
+      </button>
+      <button class="mini-act pause-btn" data-act="pause" aria-label="Пауза"><span></span><span></span></button>
+    </div>
+    <canvas id="minimap" width="288" height="112"></canvas>
+  </div>
+
+  <div id="joyZone"><div id="joyBase" hidden><div id="joyKnob"></div></div></div>
+
+  <div class="actions" id="actions">
+    <button class="act attack" id="atkBtn" aria-label="Атака"><span>Атака</span></button>
+    <button class="act small" id="atkCreep" aria-label="Бить крипа">Крип</button>
+    <button class="act small" id="atkTower" aria-label="Бить башню">Башня</button>
+    <button class="act ab" id="abQ"><b>Q</b><small></small><i class="cd"></i><em></em><span class="pips"></span></button>
+    <button class="act ab" id="abW"><b>W</b><small></small><i class="cd"></i><em></em><span class="pips"></span></button>
+    <button class="act ab" id="abE"><b>E</b><small></small><i class="cd"></i><em></em><span class="pips"></span></button>
+    <button class="act ab ult" id="abR"><b>R</b><small></small><i class="cd"></i><em></em><span class="pips"></span></button>
+    <button class="rank" data-rank="Q" id="rankQ" hidden aria-label="Улучшить Q">+</button>
+    <button class="rank" data-rank="W" id="rankW" hidden aria-label="Улучшить W">+</button>
+    <button class="rank" data-rank="E" id="rankE" hidden aria-label="Улучшить E">+</button>
+    <button class="rank" data-rank="R" id="rankR" hidden aria-label="Улучшить R">+</button>
+    <button class="act item-act" id="activeBtn" data-act="active" hidden aria-label="Песочные часы"><b>Часы</b><i class="cd"></i><em></em></button>
+    <button class="act spell" id="abS1"><b></b><i class="cd"></i><em></em></button>
+    <button class="act spell" id="abS2"><b></b><i class="cd"></i><em></em></button>
+  </div>
+  <div id="aimCancel" hidden>Отмена</div>
+
+  <div class="utility">
+    <button class="util" data-act="recall" id="recallBtn">Домой</button>
+    <button class="util" data-act="shop" id="shopBtn">Лавка</button>
+    <button class="util quick" data-act="quickbuy" id="quickBtn" hidden></button>
+  </div>
+
+  <div id="tutorialBox" hidden><b></b><span></span></div>
+
+  <div id="practicePanel" hidden>
+    <button class="util" data-act="pr-level">+1 уровень</button>
+    <button class="util" data-act="pr-gold">+1000 золота</button>
+    <button class="util" data-act="pr-cd" id="prCd">Без перезарядки</button>
+    <button class="util" data-act="pr-waves" id="prWaves">Крипы</button>
+  </div>
+
+  <div id="death" hidden>
+    <p>Вы погибли</p>
+    <strong id="deathTimer">10</strong>
+  </div>
+
+  <div id="shop" class="panel-wrap" hidden>
+    <div class="panel shop-card">
+      <header><h2>Лавка</h2><span class="gold" id="shopGold">0</span><button class="close" id="shopClose" aria-label="Закрыть">×</button></header>
+      <p class="hint" id="shopHint"></p>
+      <div class="slots" id="shopSlots"></div>
+      <h3>Рекомендуем</h3>
+      <ul class="items" id="shopBuild"></ul>
+      <h3>Части</h3>
+      <ul class="items" id="shopParts"></ul>
+      <h3>Предметы</h3>
+      <ul class="items" id="shopItems"></ul>
+    </div>
+  </div>
+
+  <div id="score" class="panel-wrap" hidden>
+    <div class="panel score-card">
+      <header><h2>Счёт</h2><button class="close" id="scoreClose" aria-label="Закрыть">×</button></header>
+      <div id="scoreBody" class="score-body"></div>
+    </div>
+  </div>
+</div>
+
+<div id="pause" class="screen" hidden>
+  <div class="menu-card">
+    <h2 class="screen-title" id="pauseTitle">Пауза</h2>
+    <div class="settings">
+      <label for="setSfx">Звуки <input type="range" id="setSfx" min="0" max="1" step="0.05"></label>
+      <label for="setMusic">Музыка <input type="range" id="setMusic" min="0" max="1" step="0.05"></label>
+      <label for="setButtons">Размер кнопок <input type="range" id="setButtons" min="0.8" max="1.3" step="0.05"></label>
+      <label for="setVibro">Вибрация <input type="checkbox" id="setVibro"></label>
+      <div class="seg" role="radiogroup" aria-label="Качество графики">
+        <span>Графика</span>
+        <label><input type="radio" name="quality" id="qLow" value="low"><span>Низкая</span></label>
+        <label><input type="radio" name="quality" id="qMedium" value="medium"><span>Средняя</span></label>
+        <label><input type="radio" name="quality" id="qHigh" value="high"><span>Высокая</span></label>
+      </div>
+    </div>
+    <div class="menu-buttons">
+      <button class="play" id="resumeBtn">Продолжить</button>
+      <button class="ghost" id="quitBtn">Выйти в меню</button>
+    </div>
+  </div>
+</div>
+
+<div id="menu" class="screen">
+  <div class="menu-card wide">
+    <h1>Дота <span>3</span></h1>
+    <div class="seg" role="radiogroup" aria-label="Режим">
+      <label><input type="radio" name="mode" id="mode1" value="1v1"><span>1 на 1</span></label>
+      <label><input type="radio" name="mode" id="mode3" value="3v3"><span>3 на 3</span></label>
+    </div>
+    <div class="heroes" id="heroCards" role="radiogroup" aria-label="Герой"></div>
+    <div class="seg" role="radiogroup" aria-label="Талант" id="talents"><span>Талант</span></div>
+    <p class="tag small" id="talentDesc"></p>
+    <div class="seg" role="group" aria-label="Заклинания" id="spellPick"><span>Заклинания (2)</span></div>
+    <div class="seg" role="radiogroup" aria-label="Сложность ботов">
+      <label><input type="radio" name="diff" id="diffEasy" value="easy"><span>Легко</span></label>
+      <label><input type="radio" name="diff" id="diffNormal" value="normal"><span>Нормально</span></label>
+      <label><input type="radio" name="diff" id="diffHard" value="hard"><span>Сложно</span></label>
+    </div>
+    <div class="menu-buttons">
+      <button class="play" id="playBtn">Играть</button>
+      <button class="ghost" id="practiceBtn">Тренировка</button>
+      <button class="ghost" id="tutorialBtn">Обучение</button>
+      <button class="ghost" id="profileBtn">Профиль <span class="gem" id="menuGems">0</span></button>
+      <button class="ghost" id="settingsBtn">Настройки</button>
+    </div>
+    <details class="howto">
+      <summary>Как играть</summary>
+      <ul>
+        <li>Левая половина экрана — джойстик.</li>
+        <li>«Атака» бьёт ближайшего врага, сначала героев. «Крип» добивает самого раненого крипа, «Башня» бьёт здание.</li>
+        <li>Умение: тап — по ближайшей цели, потянуть — прицелиться вручную, увести палец на «Отмена» — не применять.</li>
+        <li>На каждом уровне нажмите «+» над умением, чтобы его улучшить. Ульта открывается с 5 уровня.</li>
+        <li>Золото за добивание крипов и монстров. В лавке на базе части собираются в сильные предметы, кнопка внизу покупает следующий рекомендуемый.</li>
+        <li>В кустах вас не видно. Монстры в лесу дают усиления, дракон у реки — урон всей команде.</li>
+        <li>Цель — разрушить две вражеские башни и нексус.</li>
+        <li>На компьютере: WASD — ходить, пробел — атака, C — крип, V — башня, Q / F / E / R — умения, Ctrl + умение — улучшить, 5 — предмет, T — быстрая покупка, P — лавка, Tab — счёт, B — домой, Esc — пауза.</li>
+      </ul>
+    </details>
+  </div>
+</div>
+
+<div id="profile" class="screen" hidden>
+  <div class="menu-card wide">
+    <h2 class="screen-title">Профиль</h2>
+    <p class="tag"><span class="gem" id="profGems">0</span> кристаллов. Выполняйте задания и покупайте скины.</p>
+    <div class="prof-grid">
+      <section>
+        <h3>Статистика</h3>
+        <div id="profStats" class="prof-stats"></div>
+      </section>
+      <section>
+        <h3>Задания на сегодня</h3>
+        <ul id="profQuests" class="quests"></ul>
+      </section>
+    </div>
+    <h3>Скины</h3>
+    <div id="profSkins" class="skins"></div>
+    <button class="play" id="profileBack">Назад</button>
+  </div>
+</div>
+
+<div id="end" class="screen" hidden>
+  <div class="menu-card wide">
+    <h1 id="endTitle">Победа</h1>
+    <p class="tag" id="endStats"></p>
+    <p class="tag" id="endQuests"></p>
+    <div class="score-body" id="endScore"></div>
+    <button class="play" id="againBtn">Ещё раз</button>
+  </div>
+</div>
+
+<div id="rotate" class="screen">
+  <div class="phone"></div>
+  <p>Поверните телефон горизонтально</p>
+</div>
+<!-- GAME:END -->
+
+<script type="importmap">
+{ "imports": { "three": "./vendor/three.module.min.js" } }
+</script>
+<script type="module" src="src/main.js"></script>
+</body>
+</html>

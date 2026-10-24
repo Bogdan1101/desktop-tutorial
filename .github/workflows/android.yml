@@ -1,0 +1,39 @@
+# Собирает APK для Android через Capacitor. Готовый файл лежит в артефактах запуска
+# (вкладка Actions → запуск → Artifacts → dota3-apk).
+name: Android APK
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  apk:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 17
+      - name: Пакеты Capacitor
+        run: npm ci
+      - name: Android-проект
+        run: |
+          npm run android
+          # игра только горизонтальная
+          sed -i '0,/<activity/s//<activity android:screenOrientation="sensorLandscape"/' android/app/src/main/AndroidManifest.xml
+      - name: Сборка APK
+        working-directory: android
+        run: ./gradlew assembleDebug --no-daemon
+      - uses: actions/upload-artifact@v4
+        with:
+          name: dota3-apk
+          path: android/app/build/outputs/apk/debug/app-debug.apk

@@ -36,6 +36,13 @@ let scene, world, game, hud, fog, aim, tutorial = null;
 const input = new Input();
 let state = 'menu'; // menu | play | pause | end
 
+// Все переходы между экранами идут через setState: ввод принимается только в матче,
+// а при любом переходе незавершённые жесты и нажатия отменяются.
+function setState(next) {
+  state = next;
+  input.setEnabled(next === 'play');
+}
+
 function applyQuality() {
   const q = settings.quality;
   renderer.setPixelRatio(q === 'low' ? 1 : q === 'medium' ? Math.min(devicePixelRatio, 1.5) : Math.min(devicePixelRatio, 2));
@@ -277,7 +284,8 @@ function newMatch(opts = {}) {
   $('practicePanel').hidden = game.mode !== 'practice' || !!opts.tutorial;
   $('tutorialBox').hidden = true;
   tutorial = null;
-  window.dota3 = { game, simulate };
+  // для автотестов: состояние матча, ввода и экрана
+  window.dota3 = { game, simulate, input, get state() { return state; } };
 }
 
 function bindEvents(g) {
@@ -310,7 +318,7 @@ function bindEvents(g) {
 }
 
 function showEnd(winner) {
-  state = 'end';
+  setState('end');
   const p = game.player;
   const win = winner === p.team;
   $('endTitle').textContent = win ? 'Победа' : 'Поражение';
@@ -351,7 +359,7 @@ function startGame(opts = {}) {
   $('end').hidden = true;
   $('pause').hidden = true;
   $('hud').hidden = false;
-  state = 'play';
+  setState('play');
   sound.startMusic();
   try { document.documentElement.requestFullscreen?.({ navigationUI: 'hide' })?.catch(() => {}); } catch { /* нет полноэкранного режима */ }
   try { screen.orientation?.lock?.('landscape')?.catch(() => {}); } catch { /* нельзя зафиксировать поворот */ }
@@ -360,22 +368,21 @@ function startGame(opts = {}) {
 
 function pause(on) {
   if (on && state === 'play') {
-    state = 'pause';
+    setState('pause');
     $('pauseTitle').textContent = 'Пауза';
     $('resumeBtn').textContent = 'Продолжить';
     $('quitBtn').hidden = false;
     $('pause').hidden = false;
-    input.reset();
     sound.suspend();
   } else if (!on && state === 'pause') {
-    state = 'play';
+    setState('play');
     $('pause').hidden = true;
     sound.resume();
   }
 }
 
 function toMenu() {
-  state = 'menu';
+  setState('menu');
   for (const id of ['pause', 'end', 'hud', 'profile']) $(id).hidden = true;
   $('menu').hidden = false;
   sound.stopMusic();

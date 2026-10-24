@@ -1,5 +1,9 @@
 // Управление: плавающий джойстик слева, кнопки справа, клавиатура для компьютера.
 // Умения: тап — автоприцел, перетаскивание — ручной прицел, увод пальца на «Отмена» — отмена.
+//
+// Каждое касание кнопки или джойстика — жест в общем реестре this.gestures.
+// Жест завершается своим pointerup (действие применяется) или отменяется без применения:
+// pointercancel, потеря захвата указателя, а также reset() — пауза, меню, скрытие страницы.
 
 const AIM_DEADZONE = 14;   // пикселей до начала ручного прицела
 const AIM_FULL = 95;       // пикселей до максимальной дальности
@@ -18,14 +22,77 @@ export class Input {
     this.tipKey = null;     // чьё описание показать (зажали кнопку и держат)
     this.cancelHover = false;
     this.aimModes = {};     // key -> 'line' | 'circle' | 'dash' | 'self'
+    this.enabled = false;   // ввод принимается только во время матча
+    this.gestures = new Map(); // имя элемента -> активный жест
     this.cancelEl = document.getElementById('aimCancel');
     this.bindJoystick();
     this.bindButtons();
     this.bindKeys();
+    addEventListener('blur', () => this.reset());
+    document.addEventListener('visibilitychange', () => { if (document.hidden) this.reset(); });
   }
 
   setAimModes(modes) { this.aimModes = modes; }
 
+  // Включает или выключает приём ввода; при любом переключении всё начатое сбрасывается
+  setEnabled(on) {
+    this.reset();
+    this.enabled = on;
+  }
+
+  // Единый сброс: отменяет все жесты без применения и очищает очереди и состояние
+  reset() {
+    for (const name of [...this.gestures.keys()]) this.cancelGesture(name);
+    this.casts.length = 0;
+    this.actions.length = 0;
+    this.keys.clear();
+    this.attackHeld = false;
+    this.filter = null;
+    this.aiming = null;
+    this.tipKey = null;
+    this.cancelHover = false;
+    this.cancelEl.hidden = true;
+    this.cancelEl.classList.remove('hot');
+    this.joy = null;
+    this.move.x = 0; this.move.z = 0;
+  }
+
+  // --- реестр жестов -----------------------------------------------------------------
+  // handlers: start(e, g) — начало; move(e, g); end(e, g) — штатное завершение; cancel(g) — отмена
+  track(el, name, handlers) {
+    el.addEventListener('pointerdown', (e) => {
+      if (!this.enabled || this.gestures.has(name)) return; // занят другим пальцем — не перехватываем
+      e.preventDefault();
+      try { el.setPointerCapture(e.pointerId); } catch { /* указатель уже отпущен */ }
+      const g = { id: e.pointerId, el, handlers };
+      this.gestures.set(name, g);
+      handlers.start(e, g);
+    });
+    const own = (e) => {
+      const g = this.gestures.get(name);
+      return g && g.id === e.pointerId ? g : null;
+    };
+    el.addEventListener('pointermove', (e) => { const g = own(e); if (g) handlers.move?.(e, g); });
+    el.addEventListener('pointerup', (e) => {
+      const g = own(e);
+      if (!g) return;
+      this.gestures.delete(name);
+      handlers.end(e, g);
+    });
+    // после штатного pointerup жест уже удалён, поэтому идущий за ним lostpointercapture ничего не отменит
+    el.addEventListener('pointercancel', (e) => { if (own(e)) this.cancelGesture(name); });
+    el.addEventListener('lostpointercapture', (e) => { if (own(e)) this.cancelGesture(name); });
+  }
+
+  cancelGesture(name) {
+    const g = this.gestures.get(name);
+    if (!g) return;
+    this.gestures.delete(name);
+    g.handlers.cancel(g);
+    try { if (g.el.hasPointerCapture(g.id)) g.el.releasePointerCapture(g.id); } catch { /* уже отпущен */ }
+  }
+
+  // --- джойстик ---------------------------------------------------------------------
   bindJoystick() {
     const zone = document.getElementById('joyZone');
     const base = document.getElementById('joyBase');
@@ -40,27 +107,25 @@ export class Input {
       this.move.x = d > 4 ? (dx / d) * mag : 0;
       this.move.z = d > 4 ? (dy / d) * mag : 0;
     };
-    zone.addEventListener('pointerdown', (e) => {
-      if (this.joy) return;
-      e.preventDefault();
-      zone.setPointerCapture(e.pointerId);
-      this.joy = { id: e.pointerId, x: e.clientX, y: e.clientY };
-      const r = zone.getBoundingClientRect();
-      base.style.left = `${e.clientX - r.left}px`;
-      base.style.top = `${e.clientY - r.top}px`;
-      base.hidden = false;
-      update(e);
-    });
-    zone.addEventListener('pointermove', (e) => { if (this.joy && e.pointerId === this.joy.id) update(e); });
-    const end = (e) => {
-      if (!this.joy || e.pointerId !== this.joy.id) return;
+    const release = () => {
       this.joy = null;
       this.move.x = 0; this.move.z = 0;
       knob.style.transform = '';
       base.hidden = true;
     };
-    zone.addEventListener('pointerup', end);
-    zone.addEventListener('pointercancel', end);
+    this.track(zone, 'joystick', {
+      start: (e) => {
+        this.joy = { id: e.pointerId, x: e.clientX, y: e.clientY };
+        const r = zone.getBoundingClientRect();
+        base.style.left = `${e.clientX - r.left}px`;
+        base.style.top = `${e.clientY - r.top}px`;
+        base.hidden = false;
+        update(e);
+      },
+      move: (e) => update(e),
+      end: release,
+      cancel: release,
+    });
   }
 
   overCancel(x, y) {
@@ -69,73 +134,74 @@ export class Input {
     return Math.hypot(x - cx, y - cy) < r.width / 2 + 10;
   }
 
+  // --- умения: тап, прицел, отмена, удержание для описания ----------------------------
   bindAbility(btn, key) {
-    let st = null;
-    btn.addEventListener('pointerdown', (e) => {
-      e.preventDefault();
-      btn.setPointerCapture(e.pointerId);
-      btn.classList.add('held');
-      st = { id: e.pointerId, x: e.clientX, y: e.clientY, tip: false };
-      // удержание на месте — показать описание; отпускание после этого умение не применяет
-      st.timer = setTimeout(() => {
-        if (!st || (this.aiming && this.aiming.manual)) return;
-        st.tip = true;
-        this.tipKey = key;
-        this.aiming = null;
-        this.cancelEl.hidden = true;
-      }, TIP_DELAY);
-      const mode = this.aimModes[key];
-      if (mode && mode !== 'self') {
-        this.aiming = { key, dx: 0, dz: 0, mag: 0, manual: false };
-        this.cancelEl.hidden = false;
-      }
-    });
-    btn.addEventListener('pointermove', (e) => {
-      if (!st || e.pointerId !== st.id || st.tip) return;
-      const dx = e.clientX - st.x, dy = e.clientY - st.y;
-      const d = Math.hypot(dx, dy);
-      if (d > AIM_DEADZONE) clearTimeout(st.timer);
-      if (!this.aiming) return;
-      if (d > AIM_DEADZONE) {
-        this.aiming.manual = true;
-        this.aiming.dx = dx / d;
-        this.aiming.dz = dy / d;
-        this.aiming.mag = Math.min(1, (d - AIM_DEADZONE) / (AIM_FULL - AIM_DEADZONE));
-      }
-      this.cancelHover = this.overCancel(e.clientX, e.clientY);
-      this.cancelEl.classList.toggle('hot', this.cancelHover);
-    });
-    const finish = (e, cancelled) => {
-      if (!st || e.pointerId !== st.id) return;
+    const clear = (g) => {
+      clearTimeout(g.timer);
       btn.classList.remove('held');
-      clearTimeout(st.timer);
-      const a = this.aiming;
-      if (st.tip) { cancelled = true; this.tipKey = null; }
-      if (!cancelled && !(a && this.cancelHover)) {
-        if (a && a.manual) this.casts.push({ key, manual: { dx: a.dx, dz: a.dz, mag: a.mag } });
-        else this.casts.push({ key });
+      if (this.tipKey === key) this.tipKey = null;
+      if (this.aiming?.key === key) {
+        this.aiming = null;
+        this.cancelHover = false;
+        this.cancelEl.hidden = true;
+        this.cancelEl.classList.remove('hot');
       }
-      st = null;
-      this.aiming = null;
-      this.cancelHover = false;
-      this.cancelEl.hidden = true;
-      this.cancelEl.classList.remove('hot');
     };
-    btn.addEventListener('pointerup', (e) => finish(e, false));
-    btn.addEventListener('pointercancel', (e) => finish(e, true));
+    this.track(btn, 'ability:' + key, {
+      start: (e, g) => {
+        btn.classList.add('held');
+        g.x = e.clientX;
+        g.y = e.clientY;
+        g.tip = false;
+        // удержание на месте — показать описание; отпускание после этого умение не применяет
+        g.timer = setTimeout(() => {
+          if (this.gestures.get('ability:' + key) !== g || this.aiming?.manual) return;
+          g.tip = true;
+          this.tipKey = key;
+          if (this.aiming?.key === key) { this.aiming = null; this.cancelEl.hidden = true; }
+        }, TIP_DELAY);
+        const mode = this.aimModes[key];
+        if (mode && mode !== 'self') {
+          this.aiming = { key, dx: 0, dz: 0, mag: 0, manual: false };
+          this.cancelEl.hidden = false;
+        }
+      },
+      move: (e, g) => {
+        if (g.tip) return;
+        const dx = e.clientX - g.x, dy = e.clientY - g.y;
+        const d = Math.hypot(dx, dy);
+        if (d > AIM_DEADZONE) clearTimeout(g.timer);
+        if (this.aiming?.key !== key) return;
+        if (d > AIM_DEADZONE) {
+          this.aiming.manual = true;
+          this.aiming.dx = dx / d;
+          this.aiming.dz = dy / d;
+          this.aiming.mag = Math.min(1, (d - AIM_DEADZONE) / (AIM_FULL - AIM_DEADZONE));
+        }
+        this.cancelHover = this.overCancel(e.clientX, e.clientY);
+        this.cancelEl.classList.toggle('hot', this.cancelHover);
+      },
+      end: (e, g) => {
+        const a = this.aiming?.key === key ? this.aiming : null;
+        const cancelled = g.tip || (a && this.cancelHover);
+        if (!cancelled) {
+          if (a && a.manual) this.casts.push({ key, manual: { dx: a.dx, dz: a.dz, mag: a.mag } });
+          else this.casts.push({ key });
+        }
+        clear(g);
+      },
+      cancel: clear,
+    });
   }
 
+  // --- кнопки атаки: действуют, пока палец держит ------------------------------------
   bindHold(btn, onDown, onUp) {
-    btn.addEventListener('pointerdown', (e) => {
-      e.preventDefault();
-      btn.setPointerCapture(e.pointerId);
-      btn.classList.add('held');
-      onDown();
-    });
     const up = () => { btn.classList.remove('held'); onUp(); };
-    btn.addEventListener('pointerup', up);
-    btn.addEventListener('pointercancel', up);
-    btn.addEventListener('lostpointercapture', up);
+    this.track(btn, 'hold:' + btn.id, {
+      start: () => { btn.classList.add('held'); onDown(); },
+      end: up,
+      cancel: up,
+    });
   }
 
   bindButtons() {
@@ -144,10 +210,14 @@ export class Input {
     this.bindHold(document.getElementById('atkTower'), () => { this.attackHeld = true; this.filter = 'tower'; }, () => { this.attackHeld = false; this.filter = null; });
     for (const key of ['Q', 'W', 'E', 'R', 'S1', 'S2']) this.bindAbility(document.getElementById('ab' + key), key);
     for (const btn of document.querySelectorAll('[data-rank]')) {
-      btn.addEventListener('pointerdown', (e) => { e.preventDefault(); e.stopPropagation(); this.actions.push({ type: 'rank', key: btn.dataset.rank }); });
+      btn.addEventListener('pointerdown', (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        if (this.enabled) this.actions.push({ type: 'rank', key: btn.dataset.rank });
+      });
     }
     for (const btn of document.querySelectorAll('[data-act]')) {
-      btn.addEventListener('click', () => this.actions.push({ type: btn.dataset.act }));
+      btn.addEventListener('click', () => { if (this.enabled) this.actions.push({ type: btn.dataset.act }); });
     }
     for (const el of document.querySelectorAll('.act, .util, .mini-act')) el.addEventListener('contextmenu', (e) => e.preventDefault());
   }
@@ -155,8 +225,11 @@ export class Input {
   bindKeys() {
     const abil = { Digit1: 'Q', Digit2: 'W', Digit3: 'E', Digit4: 'R', KeyQ: 'Q', KeyE: 'E', KeyR: 'R', KeyF: 'W' };
     addEventListener('keydown', (e) => {
-      if (e.repeat) return;
+      if (!this.enabled) return;
+      if (e.code === 'Tab' || e.code === 'Space') e.preventDefault();
+      // автоповтор держит клавишу движения зажатой, но не повторяет действия
       this.keys.add(e.code);
+      if (e.repeat) return;
       if (abil[e.code]) {
         if (e.ctrlKey) this.actions.push({ type: 'rank', key: abil[e.code] });
         else this.casts.push({ key: abil[e.code] });
@@ -165,14 +238,12 @@ export class Input {
       if (e.code === 'KeyX') this.casts.push({ key: 'S2' });
       if (e.code === 'KeyB') this.actions.push({ type: 'recall' });
       if (e.code === 'KeyP') this.actions.push({ type: 'shop' });
-      if (e.code === 'Tab') { e.preventDefault(); this.actions.push({ type: 'score' }); }
+      if (e.code === 'Tab') this.actions.push({ type: 'score' });
       if (e.code === 'Escape') this.actions.push({ type: 'pause' });
       if (e.code === 'Digit5') this.actions.push({ type: 'active' });
       if (e.code === 'KeyT') this.actions.push({ type: 'quickbuy' });
-      if (e.code === 'Space') e.preventDefault();
     });
     addEventListener('keyup', (e) => this.keys.delete(e.code));
-    addEventListener('blur', () => { this.keys.clear(); this.attackHeld = false; });
   }
 
   read() {
@@ -185,15 +256,5 @@ export class Input {
     if (k.has('KeyC')) filter = 'creep';
     if (k.has('KeyV')) filter = 'tower';
     return { x, z, attack: this.attackHeld || k.has('Space') || k.has('KeyJ') || k.has('KeyC') || k.has('KeyV'), filter };
-  }
-
-  reset() {
-    this.casts.length = 0;
-    this.actions.length = 0;
-    this.attackHeld = false;
-    this.filter = null;
-    this.aiming = null;
-    this.tipKey = null;
-    this.move.x = 0; this.move.z = 0;
   }
 }

@@ -120,6 +120,7 @@ const MARKER_COLOR = 0xffd84a;
 export class TargetMarker {
   constructor(scene) {
     this.group = new THREE.Group();
+    this.group.name = 'targetMarker';
     this.spin = new THREE.Group();
     const under = ringDecal(0x000000, 1.08, 0.5, 0.3);
     const ring = ringDecal(MARKER_COLOR, 1, 0.95, 0.13);

@@ -130,10 +130,16 @@ test('маркер не создаёт геометрию и материалы 
     return out.join(',');
   });
   const a = await ids();
-  const count = () => t.page.evaluate(() => window.dota3.game.scene.children.length);
-  const c1 = await count();
+  // Считаем только маркеры: общее число объектов сцены меняется само (манекены гибнут и возрождаются)
+  const markers = () => t.page.evaluate(() => {
+    const { game, marker } = window.dota3;
+    const all = game.scene.children.filter((c) => c.name === 'targetMarker');
+    return { n: all.length, same: all[0] === marker.group, uuid: marker.group.uuid };
+  });
+  const m1 = await markers();
   await t.frames(1);
-  check(a === await ids() && c1 === await count(), 'маркер пересоздаёт объекты');
+  const m2 = await markers();
+  check(a === await ids() && m1.n === 1 && m2.n === 1 && m2.same && m1.uuid === m2.uuid, 'маркер пересоздаёт объекты', { m1, m2 });
   await t.touch('touchEnd', []);
 });
 

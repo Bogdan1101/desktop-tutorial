@@ -4,6 +4,10 @@
 // Каждое касание кнопки или джойстика — жест в общем реестре this.gestures.
 // Жест завершается своим pointerup (действие применяется) или отменяется без применения:
 // pointercancel, потеря захвата указателя, а также reset() — пауза, меню, скрытие страницы.
+//
+// Одновременно можно: двигаться, атаковать и вести один жест умения. Все умения и заклинания
+// делят один слот 'ability': пока им владеет один палец, касания других кнопок умений
+// игнорируются. Кнопки атаки складываются в стек: цель задаёт последняя ещё зажатая.
 
 const AIM_DEADZONE = 14;   // пикселей до начала ручного прицела
 const AIM_FULL = 95;       // пикселей до максимальной дальности
@@ -23,7 +27,8 @@ export class Input {
     this.cancelHover = false;
     this.aimModes = {};     // key -> 'line' | 'circle' | 'dash' | 'self'
     this.enabled = false;   // ввод принимается только во время матча
-    this.gestures = new Map(); // имя элемента -> активный жест
+    this.gestures = new Map(); // слот -> активный жест: 'joystick', 'ability', 'hold:<кнопка>'
+    this.attackStack = [];  // зажатые кнопки атаки в порядке нажатия: { name, filter }
     this.cancelEl = document.getElementById('aimCancel');
     this.bindJoystick();
     this.bindButtons();
@@ -46,6 +51,7 @@ export class Input {
     this.casts.length = 0;
     this.actions.length = 0;
     this.keys.clear();
+    this.attackStack = [];
     this.attackHeld = false;
     this.filter = null;
     this.aiming = null;
@@ -58,10 +64,11 @@ export class Input {
   }
 
   // --- реестр жестов -----------------------------------------------------------------
+  // name — слот жеста; несколько элементов могут делить один слот, тогда жестом владеет первый.
   // handlers: start(e, g) — начало; move(e, g); end(e, g) — штатное завершение; cancel(g) — отмена
   track(el, name, handlers) {
     el.addEventListener('pointerdown', (e) => {
-      if (!this.enabled || this.gestures.has(name)) return; // занят другим пальцем — не перехватываем
+      if (!this.enabled || this.gestures.has(name)) return; // слот занят — не перехватываем и не берём захват
       e.preventDefault();
       try { el.setPointerCapture(e.pointerId); } catch { /* указатель уже отпущен */ }
       const g = { id: e.pointerId, el, handlers };
@@ -70,7 +77,7 @@ export class Input {
     });
     const own = (e) => {
       const g = this.gestures.get(name);
-      return g && g.id === e.pointerId ? g : null;
+      return g && g.el === el && g.id === e.pointerId ? g : null;
     };
     el.addEventListener('pointermove', (e) => { const g = own(e); if (g) handlers.move?.(e, g); });
     el.addEventListener('pointerup', (e) => {
@@ -147,7 +154,7 @@ export class Input {
         this.cancelEl.classList.remove('hot');
       }
     };
-    this.track(btn, 'ability:' + key, {
+    this.track(btn, 'ability', {
       start: (e, g) => {
         btn.classList.add('held');
         g.x = e.clientX;
@@ -155,7 +162,7 @@ export class Input {
         g.tip = false;
         // удержание на месте — показать описание; отпускание после этого умение не применяет
         g.timer = setTimeout(() => {
-          if (this.gestures.get('ability:' + key) !== g || this.aiming?.manual) return;
+          if (this.gestures.get('ability') !== g || this.aiming?.manual) return;
           g.tip = true;
           this.tipKey = key;
           if (this.aiming?.key === key) { this.aiming = null; this.cancelEl.hidden = true; }
@@ -194,20 +201,35 @@ export class Input {
     });
   }
 
-  // --- кнопки атаки: действуют, пока палец держит ------------------------------------
-  bindHold(btn, onDown, onUp) {
-    const up = () => { btn.classList.remove('held'); onUp(); };
-    this.track(btn, 'hold:' + btn.id, {
-      start: () => { btn.classList.add('held'); onDown(); },
+  // --- кнопки атаки: действуют, пока палец держит; при нескольких — последняя зажатая -----
+  bindAttack(btn, filter) {
+    const name = 'hold:' + btn.id;
+    const up = () => {
+      btn.classList.remove('held');
+      this.attackStack = this.attackStack.filter((a) => a.name !== name);
+      this.syncAttack();
+    };
+    this.track(btn, name, {
+      start: () => {
+        btn.classList.add('held');
+        this.attackStack.push({ name, filter });
+        this.syncAttack();
+      },
       end: up,
       cancel: up,
     });
   }
 
+  syncAttack() {
+    const top = this.attackStack[this.attackStack.length - 1];
+    this.attackHeld = !!top;
+    this.filter = top ? top.filter : null;
+  }
+
   bindButtons() {
-    this.bindHold(document.getElementById('atkBtn'), () => { this.attackHeld = true; this.filter = null; }, () => { this.attackHeld = false; });
-    this.bindHold(document.getElementById('atkCreep'), () => { this.attackHeld = true; this.filter = 'creep'; }, () => { this.attackHeld = false; this.filter = null; });
-    this.bindHold(document.getElementById('atkTower'), () => { this.attackHeld = true; this.filter = 'tower'; }, () => { this.attackHeld = false; this.filter = null; });
+    this.bindAttack(document.getElementById('atkBtn'), null);
+    this.bindAttack(document.getElementById('atkCreep'), 'creep');
+    this.bindAttack(document.getElementById('atkTower'), 'tower');
     for (const key of ['Q', 'W', 'E', 'R', 'S1', 'S2']) this.bindAbility(document.getElementById('ab' + key), key);
     for (const btn of document.querySelectorAll('[data-rank]')) {
       btn.addEventListener('pointerdown', (e) => {

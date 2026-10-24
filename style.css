@@ -82,7 +82,7 @@ button:focus-visible { outline: 2px solid var(--gold); outline-offset: 2px; }
 .ubar.enemy i { background: #ff5a4a; }
 .ubar.neutral i { background: #ffb347; }
 .ubar.me i { background: var(--hp); }
-.ubar.hero { width: 64px; margin-left: -32px; height: 8px; border: 1px solid rgba(0, 0, 0, 0.8); }
+.ubar.hero { width: 64px; margin-left: -32px; margin-top: -10px; height: 8px; border: 1px solid rgba(0, 0, 0, 0.8); } /* нижний край — на точке над головой */
 .ubar.hero b { position: absolute; left: -18px; top: -5px; width: 16px; height: 16px; border-radius: 50%; background: #111c; font: 700 10px/16px var(--font-body); text-align: center; color: var(--gold); }
 .ubar.hero s { position: absolute; left: 0; top: 0; height: 100%; background: rgba(220, 245, 255, 0.85); border-radius: 2px; }
 .ubar.hero u { position: absolute; left: 0; right: 0; bottom: 9px; text-align: center; text-decoration: none; font-size: 10px; font-weight: 700; text-shadow: 0 1px 2px #000; white-space: nowrap; }
@@ -138,17 +138,40 @@ button:focus-visible { outline: 2px solid var(--gold); outline-offset: 2px; }
 #atkCreep { right: 96px; bottom: -2px; }
 #atkTower { right: 4px; bottom: 96px; }
 .ab { width: 60px; height: 60px; }
-.ab b { font: 800 16px var(--font-display); line-height: 1; margin-top: 4px; }
-.ab small { font-size: 9px; color: var(--muted); margin-top: -14px; }
-.ab .pips { position: absolute; bottom: 4px; left: 0; right: 0; text-align: center; font-size: 6px; letter-spacing: 1px; color: var(--gold); }
+/* Кнопка умения: значок в центре, буква клавиши в верхнем углу, ранги внизу, число перезарядки —
+   отдельным слоем на тёмном круге поверх приглушённого значка. Все слои не ловят касания. */
+.ab .ico, .spell .ico { position: absolute; inset: 29% 24% 15%; color: #f4f1e8; pointer-events: none; transition: opacity 0.15s; }
+.ab .ico svg, .spell .ico svg, .ab .badge svg { width: 100%; height: 100%; display: block; fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
+.ico svg .f { fill: var(--accent); stroke: currentColor; stroke-width: 1.2; }
+.ico svg .d { stroke-dasharray: 2 2.6; }
+.ab .key { position: absolute; top: 4px; left: calc(50% - 18px); width: 16px; height: 16px; border-radius: 50%; background: rgba(8, 12, 15, 0.92);
+  border: 1px solid rgba(233, 185, 73, 0.75); font: 800 10px/14px var(--font-display); color: var(--gold); text-align: center; pointer-events: none; }
+.ab .pips { position: absolute; bottom: 2px; left: 0; right: 0; text-align: center; font-size: 6px; letter-spacing: 1px; color: var(--gold); pointer-events: none; }
 .ab .cd, .item-act .cd { position: absolute; inset: 0; border-radius: 50%; background: conic-gradient(rgba(0, 0, 0, 0.72) var(--p, 0%), transparent 0); pointer-events: none; }
-.ab em, .item-act em { position: absolute; font: 800 17px var(--font-display); font-style: normal; text-shadow: 0 1px 3px #000; pointer-events: none; }
+.ab em, .item-act em, .spell em { position: absolute; font: 800 17px var(--font-display); font-style: normal; text-shadow: 0 1px 3px #000; pointer-events: none; }
+.ab em:not(:empty), .spell em:not(:empty) { min-width: 26px; height: 26px; padding: 0 4px; border-radius: 13px; display: grid; place-items: center; background: rgba(6, 10, 13, 0.78); line-height: 1; }
+/* число перезарядки — ниже буквы клавиши, над рангами */
+.ab em:not(:empty) { top: 22px; font-size: 16px; }
+.ab .badge { position: absolute; top: 4px; left: calc(50% + 2px); width: 16px; height: 16px; border-radius: 50%; padding: 2px; pointer-events: none; }
+.ab .badge:empty { display: none; }
 .ab.off { border-color: rgba(255, 255, 255, 0.2); }
+/* перезарядка: значок приглушён, число читается поверх */
+.ab.cool .ico, .spell.cool .ico { opacity: 0.4; }
+/* не изучено: серый, но узнаваемый значок и пунктирная рамка */
+.ab.unlearned .ico, .ab.locked .ico { filter: grayscale(1); opacity: 0.6; }
+.ab.unlearned { border-style: dashed; border-color: rgba(255, 255, 255, 0.45); }
+/* ульта закрыта: замок в углу и уровень открытия маленькой плашкой внизу */
+.ab.locked { border-style: dashed; }
+.ab.locked .badge { background: rgba(8, 12, 15, 0.92); color: #e9e2cf; }
+.ab.locked em { font-size: 10px; height: 16px; min-width: 0; padding: 0 5px; top: auto; bottom: 9px; border-radius: 8px; }
+/* без замка/капли буква стоит по центру */
+.ab:has(.badge:empty) .key { left: calc(50% - 8px); }
+/* мало маны: капля в углу и синяя рамка */
+.ab.nomana .badge { background: rgba(8, 12, 15, 0.92); color: #7fb2ff; }
 #abQ { right: 150px; bottom: 34px; }
 #abW { right: 128px; bottom: 108px; }
 #abE { right: 64px; bottom: 150px; }
 #abR { right: 196px; bottom: 120px; width: 58px; height: 58px; border-color: #ff7a3d; }
-.ab.ult em { font-size: 11px; }
 .rank {
   position: absolute; pointer-events: auto; touch-action: none; width: 28px; height: 28px; border-radius: 50%; padding: 0; cursor: pointer;
   border: 2px solid #fff6d6; background: radial-gradient(circle at 40% 35%, #ffd76a, #b07a12); color: #2a1800;
@@ -301,12 +324,13 @@ button:focus-visible { outline: 2px solid var(--gold); outline-offset: 2px; }
 .bar.mp { height: 9px; }
 .bar.mp i { background: #3f8cff; }
 .bar.mp span { font-size: 8px; line-height: 9px; }
-.ab.nomana { border-color: #3f8cff; }
+.ab.nomana { border-color: #3f8cff; border-style: dashed; }
 .ab.nomana b { color: #7fb2ff; }
+.ab.nomana .ico { opacity: 0.55; }
 .spell { width: 44px; height: 44px; border-color: #b9c6d2; border-width: 1px; }
-.spell b { font-size: 8px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.02em; }
+.spell .ico { inset: 20%; }
 .spell .cd { position: absolute; inset: 0; border-radius: 50%; background: conic-gradient(rgba(0, 0, 0, 0.72) var(--p, 0%), transparent 0); pointer-events: none; }
-.spell em { position: absolute; font: 800 14px var(--font-display); font-style: normal; text-shadow: 0 1px 3px #000; pointer-events: none; }
+.spell em:not(:empty) { font-size: 13px; min-width: 26px; height: 26px; }
 #abS1 { right: 292px; bottom: 66px; }
 #abS2 { right: 292px; bottom: 120px; }
 

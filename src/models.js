@@ -342,10 +342,15 @@ function robotHero(team, heroId, colors) {
 
 export function heroModel(team, heroId, skinId = 'base') {
   const colors = skinColors(team, heroId, skinId);
-  if (robot) return robotHero(team, heroId, colors);
-  if (heroId === 'grok') return grokModel(team, colors.main);
-  if (heroId === 'lira') return liraModel(team, colors.main);
-  return pyroModel(team, colors.main);
+  const m = robot ? robotHero(team, heroId, colors)
+    : heroId === 'grok' ? grokModel(team, colors.main)
+    : heroId === 'lira' ? liraModel(team, colors.main)
+    : pyroModel(team, colors.main);
+  // Верх силуэта (шляпа, шлем, шапка) в покое — один раз при создании: над ним стоит полоска
+  // здоровья. Каждый кадр не пересчитывается, поэтому полоска не прыгает при беге и ударах.
+  m.group.updateMatrixWorld(true);
+  m.top = new THREE.Box3().setFromObject(m.group, true).max.y;
+  return m;
 }
 
 export function creepModel(team, type) {

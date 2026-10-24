@@ -353,7 +353,8 @@ export class Hero extends Unit {
     return this.damageMul * (1 + dragons * 0.08) * (this.hasBuff('red') ? 1.15 : 1) * (this.talent === 'onslaught' ? 1.08 : 1);
   }
   get inStasis() { return this.game.time < this.stasisUntil; }
-  get barHeight() { return 3.2; }
+  // над верхом своей модели: у Пиро выше шляпа, у Лиры ниже шапка, у запасных моделей — свой рост
+  get barHeight() { return (this.model?.top ?? 3) + 0.15; }
 
   get inBase() {
     return Math.hypot(this.pos.x - side(this.team) * MAP.fountainX, this.pos.z) < MAP.baseRadius;

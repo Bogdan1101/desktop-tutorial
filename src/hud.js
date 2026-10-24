@@ -2,6 +2,8 @@
 import * as THREE from 'three';
 import { ABILITIES, ITEMS, MAX_ITEMS, MAP, HERO, TEAM, WALLS, BUFFS, STAT_NAMES, TEAM_NAME, SPELLS } from './config.js';
 
+import { abilityIcon, svgIcon, LOCK, DROP } from './icons.js';
+
 const $ = (id) => document.getElementById(id);
 const fmtTime = (t) => `${Math.floor(t / 60)}:${String(Math.floor(t) % 60).padStart(2, '0')}`;
 
@@ -37,20 +39,21 @@ export class Hud {
     };
     const p = game.player;
     this.el.portrait.textContent = p.name[0];
+    // Значок — главное на кнопке; полное название — в доступном имени и в описании по удержанию
     this.spellBtns = p.spells.map((id, i) => {
       const btn = $(`abS${i + 1}`);
-      btn.querySelector('b').textContent = SPELLS[id].short;
-      btn.setAttribute('aria-label', SPELLS[id].name);
-      return { id, btn, cd: btn.querySelector('.cd'), em: btn.querySelector('em') };
+      btn.querySelector('.ico').replaceChildren(abilityIcon(id));
+      btn.setAttribute('aria-label', `Заклинание: ${SPELLS[id].name}`);
+      return { id, btn, cd: btn.querySelector('.cd'), em: btn.querySelector('em'), state: '' };
     });
     this.ab = {};
     for (const k of 'QWER') {
       const btn = $('ab' + k);
       const def = ABILITIES[p.abilityIds[k]];
-      btn.querySelector('small').textContent = def.short;
-      btn.setAttribute('aria-label', def.name);
+      btn.querySelector('.ico').replaceChildren(abilityIcon(p.abilityIds[k]));
       this.ab[k] = {
         btn, cd: btn.querySelector('.cd'), em: btn.querySelector('em'), pips: btn.querySelector('.pips'),
+        badge: btn.querySelector('.badge'), name: `${k}: ${def.name}`, state: '',
         rank: document.querySelector(`[data-rank="${k}"]`), max: def.ult ? 3 : 4,
       };
     }
@@ -332,6 +335,8 @@ export class Hud {
       if (!show) { if (b.shown) { b.el.style.display = 'none'; b.shown = false; } continue; }
       if (!b.shown) { b.el.style.display = ''; b.shown = true; }
       b.el.style.transform = `translate(${s.x | 0}px, ${s.y | 0}px)`;
+      // в толпе полоска ближнего к камере героя (ниже на экране) лежит поверх дальних — как и модели
+      if (b.lvl) { const z = Math.max(0, s.y | 0); if (b.z !== z) { b.el.style.zIndex = z; b.z = z; } }
       const w = Math.round(u.hp / u.maxHp * 100);
       if (w !== b.lastW) { b.fill.style.width = w + '%'; b.lastW = w; }
       if (u.isStructure) b.el.classList.toggle('locked', u.invulnerable);
@@ -366,11 +371,23 @@ export class Hud {
       const cd = p.cd[k];
       const def = p.ability(k);
       const max = rank ? def.cooldown[rank - 1] * (1 - p.cdr) : 1;
-      a.cd.style.setProperty('--p', rank === 0 ? '100%' : `${cd > 0 ? (cd / max) * 100 : 0}%`);
-      const label = rank === 0 ? (k === 'R' && p.level < HERO.ultLevels[0] ? `${HERO.ultLevels[0]} ур.` : '') : cd > 0 ? String(Math.ceil(cd)) : '';
+      // Состояние кнопки: закрыта (ульта до 5 уровня), не изучена, перезарядка, мало маны, готова.
+      // Каждое видно не только цветом: замок, серый значок с пунктиром, число, капля.
+      const locked = rank === 0 && def.ult && p.level < HERO.ultLevels[0];
+      const state = locked ? 'locked' : rank === 0 ? 'unlearned' : cd > 0 ? 'cool' : p.mana < p.manaCost(k) ? 'nomana' : 'ready';
+      a.cd.style.setProperty('--p', state === 'cool' ? `${(cd / max) * 100}%` : '0%');
+      const label = locked ? `${HERO.ultLevels[0]} ур.` : state === 'cool' ? String(Math.ceil(cd)) : '';
       if (a.em.textContent !== label) a.em.textContent = label;
-      a.btn.classList.toggle('off', rank === 0 || cd > 0 || !p.canAct);
-      a.btn.classList.toggle('nomana', rank > 0 && p.mana < p.manaCost(k));
+      if (a.state !== state) {
+        a.btn.classList.remove(a.state || 'ready');
+        a.btn.classList.add(state);
+        a.badge.replaceChildren(...(state === 'locked' ? [svgIcon(LOCK)] : state === 'nomana' ? [svgIcon(DROP)] : []));
+        const note = { locked: `, откроется на ${HERO.ultLevels[0]} уровне`, unlearned: ', не изучено', cool: ', перезарядка', nomana: ', не хватает маны', ready: '' }[state];
+        a.btn.setAttribute('aria-label', a.name + note);
+        a.state = state;
+      }
+      a.btn.classList.toggle('off', state !== 'ready' || !p.canAct);
+      a.btn.classList.toggle('nomana', state === 'nomana');
       const pips = '●'.repeat(rank) + '○'.repeat(a.max - rank);
       if (a.pips.textContent !== pips) a.pips.textContent = pips;
       a.rank.hidden = !p.alive || !p.canRankUp(k);
@@ -382,6 +399,8 @@ export class Hud {
       sb.cd.style.setProperty('--p', `${(cd / SPELLS[sb.id].cooldown) * 100}%`);
       const label = cd > 0 ? String(Math.ceil(cd)) : '';
       if (sb.em.textContent !== label) sb.em.textContent = label;
+      const state = cd > 0 ? 'cool' : 'ready';
+      if (sb.state !== state) { sb.btn.classList.toggle('cool', cd > 0); sb.state = state; }
     }
 
     if (this.fail && performance.now() >= this.fail.until) this.clearCastFeedback();

@@ -3,6 +3,7 @@
 
 const AIM_DEADZONE = 14;   // пикселей до начала ручного прицела
 const AIM_FULL = 95;       // пикселей до максимальной дальности
+const TIP_DELAY = 450;     // мс удержания без движения до показа описания
 
 export class Input {
   constructor() {
@@ -14,6 +15,7 @@ export class Input {
     this.keys = new Set();
     this.joy = null;
     this.aiming = null;     // { key, dx, dz, mag, manual }
+    this.tipKey = null;     // чьё описание показать (зажали кнопку и держат)
     this.cancelHover = false;
     this.aimModes = {};     // key -> 'line' | 'circle' | 'dash' | 'self'
     this.cancelEl = document.getElementById('aimCancel');
@@ -73,7 +75,15 @@ export class Input {
       e.preventDefault();
       btn.setPointerCapture(e.pointerId);
       btn.classList.add('held');
-      st = { id: e.pointerId, x: e.clientX, y: e.clientY };
+      st = { id: e.pointerId, x: e.clientX, y: e.clientY, tip: false };
+      // удержание на месте — показать описание; отпускание после этого умение не применяет
+      st.timer = setTimeout(() => {
+        if (!st || (this.aiming && this.aiming.manual)) return;
+        st.tip = true;
+        this.tipKey = key;
+        this.aiming = null;
+        this.cancelEl.hidden = true;
+      }, TIP_DELAY);
       const mode = this.aimModes[key];
       if (mode && mode !== 'self') {
         this.aiming = { key, dx: 0, dz: 0, mag: 0, manual: false };
@@ -81,9 +91,11 @@ export class Input {
       }
     });
     btn.addEventListener('pointermove', (e) => {
-      if (!st || e.pointerId !== st.id || !this.aiming) return;
+      if (!st || e.pointerId !== st.id || st.tip) return;
       const dx = e.clientX - st.x, dy = e.clientY - st.y;
       const d = Math.hypot(dx, dy);
+      if (d > AIM_DEADZONE) clearTimeout(st.timer);
+      if (!this.aiming) return;
       if (d > AIM_DEADZONE) {
         this.aiming.manual = true;
         this.aiming.dx = dx / d;
@@ -96,7 +108,9 @@ export class Input {
     const finish = (e, cancelled) => {
       if (!st || e.pointerId !== st.id) return;
       btn.classList.remove('held');
+      clearTimeout(st.timer);
       const a = this.aiming;
+      if (st.tip) { cancelled = true; this.tipKey = null; }
       if (!cancelled && !(a && this.cancelHover)) {
         if (a && a.manual) this.casts.push({ key, manual: { dx: a.dx, dz: a.dz, mag: a.mag } });
         else this.casts.push({ key });
@@ -179,6 +193,7 @@ export class Input {
     this.attackHeld = false;
     this.filter = null;
     this.aiming = null;
+    this.tipKey = null;
     this.move.x = 0; this.move.z = 0;
   }
 }

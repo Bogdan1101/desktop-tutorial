@@ -2,6 +2,7 @@
 import * as THREE from 'three';
 import { GLTFLoader } from '../vendor/GLTFLoader.js';
 import { clone as cloneSkinned } from '../vendor/SkeletonUtils.js';
+import { mergeGeometries } from '../vendor/BufferGeometryUtils.js';
 import { TEAM_COLOR, TEAM_GLOW, SKINS } from './config.js';
 
 const matCache = new Map();
@@ -28,22 +29,48 @@ const STONE = 0x8a8f9c;
 const STONE_DARK = 0x5d6270;
 const GOLD = 0xd9c27a;
 export const darker = (c, k = 0.6) => new THREE.Color(c).multiplyScalar(k).getHex();
+const WOOD = 0x8a5a32;
+const LIGHT_WOOD = 0xb07a3c;
+const HAT_BAND = 0xd98a2b;
+const HAIR = 0xe0a63a;
+const LEATHER = 0x6b4426;
+const ARCHER_CAP = 0x667a34;
+
+// Одна сетка из нескольких фигур одного материала: меньше вызовов отрисовки.
+// parts — [геометрия, x, y, z, rx, ry, rz]; исходные геометрии освобождаются.
+function merged(parts) {
+  const geos = parts.map(([geo, x = 0, y = 0, z = 0, rx = 0, ry = 0, rz = 0]) => {
+    geo.applyMatrix4(new THREE.Matrix4().compose(new THREE.Vector3(x, y, z), new THREE.Quaternion().setFromEuler(new THREE.Euler(rx, ry, rz)), new THREE.Vector3(1, 1, 1)));
+    const flat = geo.index ? geo.toNonIndexed() : geo;
+    if (flat !== geo) geo.dispose();
+    return flat;
+  });
+  const out = mergeGeometries(geos);
+  for (const g of geos) g.dispose();
+  return out;
+}
 
 function pyroModel(team, c) {
   const g = new THREE.Group();
   const robe = mesh(new THREE.CylinderGeometry(0.32, 0.62, 1.15, 7), mat(c), 0, 0.58, 0);
   const torso = mesh(new THREE.CylinderGeometry(0.44, 0.36, 0.62, 7), mat(darker(c)), 0, 1.45, 0);
   const head = mesh(new THREE.IcosahedronGeometry(0.31, 0), mat(SKIN), 0, 2.02, 0);
-  const hood = mesh(new THREE.ConeGeometry(0.4, 0.7, 7), mat(c), 0, 2.4, -0.02);
-  hood.rotation.x = -0.15;
+  // шляпа с полями и посох выше головы — как у модели-робота
+  const hood = mesh(merged([
+    [new THREE.CylinderGeometry(0.7, 0.7, 0.06, 12), 0, 2.3, 0],
+    [new THREE.ConeGeometry(0.4, 0.85, 7), 0, 2.72, -0.03, -0.12],
+    [new THREE.ConeGeometry(0.17, 0.42, 5), 0, 3.15, -0.17, -0.95],
+  ]), mat(darker(c, 0.45)));
+  const band = mesh(new THREE.CylinderGeometry(0.41, 0.43, 0.1, 9), mat(HAT_BAND), 0, 2.38, 0);
   const shL = mesh(new THREE.IcosahedronGeometry(0.2, 0), mat(GOLD), -0.44, 1.7, 0);
   const shR = mesh(new THREE.IcosahedronGeometry(0.2, 0), mat(GOLD), 0.44, 1.7, 0);
   const weapon = new THREE.Group();
-  weapon.add(mesh(new THREE.CylinderGeometry(0.05, 0.06, 2.1, 5), mat(0x6b4a2f), 0, 0, 0));
-  const orb = mesh(new THREE.IcosahedronGeometry(0.2, 0), mat(0xffa63d, { glow: true }), 0, 1.15, 0, false);
+  // навершие ниже полоски здоровья, чтобы огонь не прятался за ней
+  weapon.add(mesh(new THREE.CylinderGeometry(0.06, 0.07, 2.3, 5), mat(WOOD), 0, -0.07, 0));
+  const orb = mesh(new THREE.IcosahedronGeometry(0.22, 0), mat(0xffa63d, { glow: true }), 0, 1.12, 0, false);
   weapon.add(orb);
-  weapon.position.set(0.62, 1.3, 0.15);
-  g.add(robe, torso, head, hood, shL, shR, weapon);
+  weapon.position.set(0.82, 1.3, 0.15); // за краем полей шляпы
+  g.add(robe, torso, head, hood, band, shL, shR, weapon);
   return { group: g, orb, weapon };
 }
 
@@ -57,13 +84,16 @@ function grokModel(team, c) {
   const hornL = mesh(new THREE.ConeGeometry(0.09, 0.4, 4), mat(0xeee6cf), -0.36, 2.45, 0);
   hornL.rotation.z = 0.8;
   const hornR = hornL.clone(); hornR.position.x = 0.36; hornR.rotation.z = -0.8;
-  const padL = mesh(new THREE.BoxGeometry(0.5, 0.3, 0.6), mat(STONE), -0.78, 1.75, 0);
-  const padR = padL.clone(); padR.position.x = 0.78;
+  const padL = mesh(new THREE.BoxGeometry(0.62, 0.36, 0.72), mat(STONE), -0.85, 1.8, 0);
+  const padR = padL.clone(); padR.position.x = 0.85;
   const weapon = new THREE.Group();
-  const shield = mesh(new THREE.CylinderGeometry(0.62, 0.62, 0.14, 8), mat(darker(c, 0.8)), 0, 0, 0);
+  const shield = mesh(new THREE.CylinderGeometry(0.78, 0.78, 0.14, 8), mat(darker(c, 0.7)), 0, 0, 0);
   shield.rotation.z = Math.PI / 2;
-  const boss = mesh(new THREE.IcosahedronGeometry(0.2, 0), mat(GOLD), 0.1, 0, 0);
-  weapon.add(shield, boss);
+  const rim = mesh(merged([
+    [new THREE.TorusGeometry(0.8, 0.07, 4, 8), 0, 0, 0, 0, Math.PI / 2, 0], // кайма по краю, лицо щита не закрывает
+    [new THREE.IcosahedronGeometry(0.22, 0), 0.12, 0, 0],
+  ]), mat(GOLD));
+  weapon.add(shield, rim);
   weapon.position.set(-0.85, 1.25, 0.35);
   weapon.rotation.y = -0.3;
   const orb = mesh(new THREE.OctahedronGeometry(0.15), mat(TEAM_GLOW[team], { glow: true }), 0, 1.4, 0.45, false);
@@ -81,13 +111,18 @@ function liraModel(team, c) {
   const hair = mesh(new THREE.ConeGeometry(0.16, 0.7, 5), mat(0xc8902e), 0, 1.7, -0.32);
   hair.rotation.x = 0.5;
   const weapon = new THREE.Group();
-  const bow = mesh(new THREE.TorusGeometry(0.75, 0.05, 4, 10, Math.PI), mat(0x7a5230), 0, 0, 0);
+  const bow = mesh(new THREE.TorusGeometry(0.9, 0.06, 4, 12, Math.PI), mat(LIGHT_WOOD), 0, 0, 0);
   bow.rotation.z = -Math.PI / 2;
-  const string = mesh(new THREE.CylinderGeometry(0.01, 0.01, 1.5, 3), mat(0xf2efe6), 0, 0, 0, false);
+  const string = mesh(new THREE.CylinderGeometry(0.012, 0.012, 1.8, 3), mat(0xf2efe6), 0, 0, 0, false);
   weapon.add(bow, string);
   weapon.position.set(0.5, 1.3, 0.3);
   const orb = mesh(new THREE.OctahedronGeometry(0.12), mat(0xfff1a8, { glow: true }), 0.6, 1.3, 0.3, false);
-  g.add(legs, torso, cape, head, hair, weapon, orb);
+  // шапка лучника и колчан за спиной
+  const cap = mesh(new THREE.ConeGeometry(0.32, 0.95, 6), mat(ARCHER_CAP), 0, 2.08, -0.2);
+  cap.rotation.x = -Math.PI / 2 + 0.25;
+  const quiver = mesh(new THREE.CylinderGeometry(0.11, 0.1, 0.75, 6), mat(LEATHER), -0.12, 1.4, -0.38);
+  quiver.rotation.set(0.2, 0, 0.45);
+  g.add(legs, torso, cape, head, hair, cap, quiver, weapon, orb);
   return { group: g, orb, weapon };
 }
 
@@ -109,12 +144,15 @@ export async function loadRobot(url) {
 export function robotReady() { return !!robot; }
 
 const HERO_SIZE = { pyro: 2.7, grok: 3, lira: 2.6 };
+// Ширина силуэта: танк шире, лучница тоньше. Только вид; размеры для боя задаёт config.
+const HERO_BUILD = { grok: [1.15, 1.12], lira: [0.9, 0.9] };
 
-function attach(bone, obj, meters) {
-  // аксессуар задаётся в метрах, а кости робота живут в своём масштабе
-  const ws = new THREE.Vector3();
-  bone.getWorldScale(ws);
-  obj.scale.multiplyScalar(meters / ws.x);
+// Прикрепляет деталь к кости так, чтобы в позе привязки она стояла в точке (x, y, z) модели
+// с поворотом (rx, ry, rz). Модель в этот момент без сдвига и поворота: её координаты — мировые.
+function pin(bone, obj, x, y, z, rx = 0, ry = 0, rz = 0) {
+  const want = new THREE.Matrix4().compose(new THREE.Vector3(x, y, z), new THREE.Quaternion().setFromEuler(new THREE.Euler(rx, ry, rz)), new THREE.Vector3(1, 1, 1));
+  obj.matrix.copy(bone.matrixWorld).invert().multiply(want);
+  obj.matrix.decompose(obj.position, obj.quaternion, obj.scale);
   bone.add(obj);
 }
 
@@ -122,7 +160,8 @@ function robotHero(team, heroId, colors) {
   const g = new THREE.Group();
   const root = cloneSkinned(robot.scene);
   const k = (HERO_SIZE[heroId] ?? 2.3) / robot.height;
-  root.scale.setScalar(k);
+  const [wx, wz] = HERO_BUILD[heroId] ?? [1, 1];
+  root.scale.set(k * wx, k, k * wz);
   root.traverse((o) => {
     if (!o.isMesh) return;
     o.castShadow = true;
@@ -136,50 +175,111 @@ function robotHero(team, heroId, colors) {
   g.updateMatrixWorld(true);
   const bones = {};
   root.traverse((o) => { if (o.isBone) bones[o.name] = o; });
-  const handR = bones.Palm2R ?? bones.LowerArmR;
-  const handL = bones.Palm2L ?? bones.LowerArmL;
-  const head = bones.Head;
-  const unit = new THREE.Group(); // аксессуары в метрах
+  const at = (b) => b.getWorldPosition(new THREE.Vector3());
+  const head = bones.Head, torso = bones.Torso_1 ?? bones.Body, hips = bones.Hips ?? bones.Body;
+  const handR = bones.Palm2R ?? bones.LowerArmR, handL = bones.Palm2L ?? bones.LowerArmL;
+  const s = (HERO_SIZE[heroId] ?? 2.7) / 2.7; // детали заданы для роста 2,7 м
+  const hy = at(head).y;
+  // Оружие в руке: от кости берём только положение, поворот — от корпуса. Так оно не
+  // выкручивается вместе с кистью и не уходит в землю, а при ударе выносится вперёд вместе с рукой.
+  const held = [];
+  const hold = (bone, obj, place) => { g.add(obj); held.push({ bone, obj, place }); };
+  const unit = new THREE.Group(); // детали, не привязанные к костям
   let orb;
   if (heroId === 'pyro') {
+    // посох выше головы, тёплый огонь в навершии
     const staff = new THREE.Group();
-    staff.add(mesh(new THREE.CylinderGeometry(0.05, 0.06, 1.9, 5), mat(0x6b4a2f), 0, 0, 0));
-    orb = mesh(new THREE.IcosahedronGeometry(0.2, 0), mat(0xffa63d, { glow: true }), 0, 1.05, 0, false);
+    // навершие выше полей шляпы, чтобы огонь был виден сверху
+    staff.add(mesh(new THREE.CylinderGeometry(0.065 * s, 0.08 * s, 3.1 * s, 6), mat(WOOD), 0, 1.2 * s, 0));
+    staff.add(mesh(new THREE.TorusGeometry(0.22 * s, 0.05 * s, 4, 10), mat(GOLD), 0, 2.85 * s, 0));
+    orb = mesh(new THREE.IcosahedronGeometry(0.22 * s, 0), mat(0xffa63d, { glow: true }), 0, 2.85 * s, 0, false);
     staff.add(orb);
-    staff.rotation.z = Math.PI; // в ладони робота ось Y смотрит вниз
-    if (handR) attach(handR, staff, 1);
-    const hat = mesh(new THREE.ConeGeometry(0.62, 1.1, 7), mat(colors.trim), 0, 1.15, 0);
-    const brim = mesh(new THREE.CylinderGeometry(0.95, 0.95, 0.08, 12), mat(colors.trim), 0, 0.62, 0);
-    const hg = new THREE.Group(); hg.add(hat, brim);
-    if (head) attach(head, hg, 1);
+    hold(handR, staff, (o, p) => {
+      o.position.set(p.x - 0.12 * s, Math.max(p.y, 0.36 * s), p.z);
+      // верх отклонён наружу, чтобы посох не проходил сквозь поля шляпы
+      o.rotation.set(THREE.MathUtils.clamp(p.z * 0.4, -0.25, 0.5), 0, 0.2);
+    });
+    // остроконечная шляпа с широкими полями — главный знак мага при виде сверху
+    const dark = darker(colors.trim, 0.75);
+    const top = hy + 0.9 * s;
+    pin(head, mesh(merged([
+      [new THREE.CylinderGeometry(0.85 * s, 0.85 * s, 0.07 * s, 14), 0, top, 0],
+      [new THREE.ConeGeometry(0.58 * s, 1.15 * s, 8), 0, top + 0.57 * s, -0.04 * s, -0.12],
+      [new THREE.ConeGeometry(0.25 * s, 0.62 * s, 6), 0, top + 1.16 * s, -0.25 * s, -0.95],
+    ]), mat(dark)), 0, 0, 0);
+    pin(head, mesh(new THREE.CylinderGeometry(0.59 * s, 0.63 * s, 0.14 * s, 10), mat(HAT_BAND)), 0, top + 0.11 * s, -0.01 * s);
+    // мантия от пояса: силуэт расширяется книзу
+    pin(hips, mesh(new THREE.CylinderGeometry(0.38 * s, 0.68 * s, 0.68 * s, 9), mat(dark)), 0, at(hips).y - 0.33 * s, -0.02 * s);
   } else if (heroId === 'grok') {
+    // большой прямоугольный щит на левой руке, золотая окантовка и умбон
     const shield = new THREE.Group();
-    const disc = mesh(new THREE.CylinderGeometry(0.6, 0.6, 0.12, 8), mat(colors.trim), 0, 0, 0);
-    disc.rotation.x = Math.PI / 2;
-    const boss = mesh(new THREE.IcosahedronGeometry(0.18, 0), mat(0xd9c27a), 0, 0, 0.1);
-    shield.add(disc, boss);
-    if (handL) attach(handL, shield, 1);
-    const helm = new THREE.Group();
-    const hornL = mesh(new THREE.ConeGeometry(0.14, 0.75, 4), mat(0xeee6cf), -0.68, 0.7, 0);
-    hornL.rotation.z = 0.6;
-    const hornR = hornL.clone(); hornR.position.x = 0.68; hornR.rotation.z = -0.6;
-    helm.add(hornL, hornR);
-    if (head) attach(head, helm, 1);
+    shield.add(mesh(new THREE.BoxGeometry(1.1 * s, 1.4 * s, 0.1 * s), mat(darker(colors.trim, 0.85)), 0, 0, 0));
+    shield.add(mesh(merged([
+      [new THREE.BoxGeometry(1.26 * s, 1.56 * s, 0.06 * s), 0, 0, -0.03 * s],
+      [new THREE.IcosahedronGeometry(0.2 * s, 0), 0, 0.05 * s, 0.09 * s],
+    ]), mat(GOLD)));
+    const fore = bones.LowerArmL ?? handL;
+    const f = new THREE.Vector3();
+    hold(handL, shield, (o, p) => {
+      g.worldToLocal(fore.getWorldPosition(f));
+      p.lerp(f, 0.4); // между кистью и предплечьем
+      o.position.set(Math.max(p.x + 0.3 * s, 0.8 * s), Math.max(p.y, 0.92 * s), p.z + 0.3 * s);
+      o.rotation.set(-0.45, 0.5, 0); // лицевая сторона чуть вверх — видна с камеры
+    });
+    // широкие каменные наплечники выступают по бокам головы
+    const shL = at(bones.ShoulderL), shR = at(bones.ShoulderR);
+    const dome = (sh, side) => [new THREE.SphereGeometry(0.5 * s, 8, 4, 0, Math.PI * 2, 0, Math.PI / 2), sh.x + side * 0.28 * s, sh.y + 0.1 * s, sh.z, 0, 0, -side * 0.4];
+    pin(torso, mesh(merged([dome(shL, 1), dome(shR, -1)]), mat(STONE)), 0, 0, 0);
+    // каменный шлем с гребнем и крупные рога
+    const top = hy + 0.78 * s;
+    const cap = new THREE.SphereGeometry(0.62 * s, 8, 4, 0, Math.PI * 2, 0, Math.PI / 2);
+    cap.scale(1, 0.55, 1);
+    pin(head, mesh(merged([
+      [cap, 0, top, 0],
+      [new THREE.BoxGeometry(0.2 * s, 0.3 * s, 1.15 * s), 0, top + 0.3 * s, 0],
+    ]), mat(STONE)), 0, 0, 0);
+    pin(head, mesh(merged([
+      [new THREE.ConeGeometry(0.18 * s, 1.0 * s, 5), 0.68 * s, top + 0.3 * s, 0.05 * s, 0, 0, -0.6],
+      [new THREE.ConeGeometry(0.18 * s, 1.0 * s, 5), -0.68 * s, top + 0.3 * s, 0.05 * s, 0, 0, 0.6],
+    ]), mat(0xeee6cf)), 0, 0, 0);
     orb = mesh(new THREE.OctahedronGeometry(0.15), mat(TEAM_GLOW[team], { glow: true }), 0, 1.5, 0.5, false);
     unit.add(orb);
   } else {
+    // большой лук в левой руке, слегка наклонён, чтобы читался и сверху
+    const R = 0.9 * s;
     const bow = new THREE.Group();
-    const arc = mesh(new THREE.TorusGeometry(0.7, 0.05, 4, 10, Math.PI), mat(0x7a5230), 0, 0, 0);
+    const arc = mesh(new THREE.TorusGeometry(R, 0.06 * s, 4, 12, Math.PI), mat(LIGHT_WOOD), -R, 0, 0);
     arc.rotation.z = -Math.PI / 2;
-    bow.add(arc, mesh(new THREE.CylinderGeometry(0.01, 0.01, 1.4, 3), mat(0xf2efe6), 0, 0, 0, false));
-    if (handL) attach(handL, bow, 1);
-    const plume = mesh(new THREE.ConeGeometry(0.2, 1.1, 5), mat(colors.trim), 0, 0.85, -0.45);
-    plume.rotation.x = -0.9;
-    const pg = new THREE.Group(); pg.add(plume);
-    if (head) attach(head, pg, 1);
+    bow.add(arc, mesh(new THREE.CylinderGeometry(0.012 * s, 0.012 * s, 2 * R, 3), mat(0xf2efe6), -R, 0, 0, false));
+    const bowWrap = new THREE.Group();
+    bowWrap.add(bow);
+    bow.rotation.y = -Math.PI / 2; // выгиб вперёд, тетива к лучнице
+    hold(handL, bowWrap, (o, p) => {
+      o.position.set(p.x + 0.3 * s, Math.max(p.y, 1.0 * s), p.z + 0.15 * s);
+      o.rotation.set(-0.25, 0.35, -0.6); // наклон наружу и к камере: дуга видна сверху
+    });
+    // шапка лучника с пером, хвост волос и колчан за спиной: силуэт головы и спины
+    const top = hy + 0.82 * s;
+    // шапка своего, оливкового цвета: голову лучницы видно и у синих, и у красных
+    pin(head, mesh(new THREE.ConeGeometry(0.52 * s, 1.4 * s, 6), mat(ARCHER_CAP)), 0, top, -0.35 * s, -Math.PI / 2 + 0.25, 0, 0);
+    pin(head, mesh(new THREE.ConeGeometry(0.07 * s, 1.0 * s, 4), mat(0xf2efe6)), 0.3 * s, top + 0.3 * s, -0.55 * s, -0.9, 0, -0.35);
+    pin(head, mesh(new THREE.ConeGeometry(0.2 * s, 1.1 * s, 6), mat(HAIR)), 0, hy + 0.1 * s, -0.7 * s, -Math.PI / 2 - 0.7, 0, 0);
+    const ty = at(torso).y;
+    pin(torso, mesh(new THREE.CylinderGeometry(0.14 * s, 0.12 * s, 0.85 * s, 6), mat(LEATHER)), -0.15 * s, ty + 0.2 * s, -0.45 * s, 0.2, 0, 0.45);
+    pin(torso, mesh(merged([-0.07, 0, 0.07].map((d, i) =>
+      [new THREE.ConeGeometry(0.07 * s, 0.24 * s, 3), -0.36 * s + d * s, ty + 0.66 * s + i * 0.03 * s, -0.54 * s + d * s, 0.2, 0, 0.45])), mat(0xf2efe6)), 0, 0, 0);
     orb = mesh(new THREE.OctahedronGeometry(0.12), mat(0xfff1a8, { glow: true }), 0, 1.4, 0.5, false);
     unit.add(orb);
   }
+  const tmp = new THREE.Vector3();
+  const update = () => {
+    for (const h of held) {
+      h.bone.getWorldPosition(tmp);
+      g.worldToLocal(tmp);
+      h.place(h.obj, tmp);
+    }
+  };
+  update();
   g.add(unit);
   const mixer = new THREE.AnimationMixer(root);
   const actions = {};
@@ -202,7 +302,7 @@ function robotHero(team, heroId, colors) {
     current = name;
   };
   play('Idle');
-  return { group: g, orb, weapon: unit, mixer, play, skeletal: true };
+  return { group: g, orb, weapon: unit, mixer, play, update, skeletal: true };
 }
 
 export function heroModel(team, heroId, skinId = 'base') {

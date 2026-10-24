@@ -638,6 +638,7 @@ export class Hero extends Unit {
       else if (this.recall) state = 'Wave';
       m.play(state, this.speed / 7);
       m.mixer.update(this.stunned ? dt * 0.2 : dt);
+      m.update?.(); // оружие в руке следует за костью
     } else {
       const bob = this.moving ? Math.abs(Math.sin(t * 11)) * 0.12 : Math.sin(t * 2) * 0.03;
       m.group.position.y = bob;
@@ -1103,7 +1104,7 @@ export class DeathAnim {
   }
   update(dt) {
     this.t += dt;
-    if (this.skeletal) this.model.mixer.update(dt);
+    if (this.skeletal) { this.model.mixer.update(dt); this.model.update?.(); }
     if (this.t >= this.life) this.done = true;
   }
   sync() {

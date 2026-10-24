@@ -200,4 +200,59 @@ test('смена матчей не копит обработчики интер�
   check(!m.hidden && !m.hits.length && m.r <= m.vw, 'после смены матчей строка отказа должна вставать на место', m);
 }, { init: countResize });
 
+// --- модели героев -------------------------------------------------------------------
+test('оружие героев не уходит в землю в покое, беге и атаке', async ({ page }) => {
+  await page.waitForFunction(() => window.dota3.game.player.model.mixer, null, { timeout: 30000 });
+  const r = await page.evaluate(async () => {
+    const THREE = await import('three');
+    const { heroModel } = await import('./src/models.js');
+    const out = [];
+    for (const id of ['pyro', 'grok', 'lira']) {
+      const m = heroModel(0, id);
+      const box = new THREE.Box3();
+      for (const [pose, steps] of [['Idle', 10], ['Running', 20], ['Punch', 12]]) {
+        m.play(pose, 1);
+        for (let i = 0; i < steps; i++) {
+          m.mixer.update(0.05);
+          m.update();
+          m.group.updateMatrixWorld(true);
+          // всё, что держит герой, — дети группы, кроме самого скелета и подсветки (m.weapon)
+          for (const held of m.group.children.filter((c, k) => k > 0 && c !== m.weapon)) {
+            box.setFromObject(held);
+            out.push({ id, pose, bottom: box.min.y, top: box.max.y });
+          }
+        }
+      }
+    }
+    return out;
+  });
+  const low = r.filter((x) => x.bottom < -0.05);
+  check(new Set(r.map((x) => x.id)).size === 3, 'не у всех героев нашлось оружие в руках', r.slice(0, 3));
+  check(!low.length, 'оружие ушло под землю', low.slice(0, 3));
+});
+
+test('запасные модели собираются без robot.glb', async ({ page }) => {
+  const r = await page.evaluate(async () => {
+    const { heroModel } = await import('./src/models.js?fallback');
+    return ['pyro', 'grok', 'lira'].map((id) => { const m = heroModel(1, id); return { id, skeletal: !!m.mixer, parts: m.group.children.length, orb: !!m.orb, weapon: !!m.weapon }; });
+  });
+  for (const x of r) check(!x.skeletal && x.parts >= 8 && x.orb && x.weapon, 'запасная модель неполная', x);
+});
+
+test('смена матчей не копит геометрию героев', async ({ page }) => {
+  await page.waitForFunction(() => window.dota3.game.player.model.mixer, null, { timeout: 30000 });
+  const counts = [];
+  for (let i = 0; i < 3; i++) {
+    await page.keyboard.press('Escape');
+    await page.waitForFunction(() => window.dota3.state === 'pause');
+    await page.evaluate(() => document.getElementById('quitBtn').click());
+    await page.waitForFunction(() => window.dota3.state === 'menu');
+    await page.evaluate(() => document.getElementById('practiceBtn').click());
+    await page.waitForFunction(() => window.dota3.state === 'play');
+    await page.evaluate(() => new Promise((ok) => { let n = 0; const f = () => (++n > 5 ? ok() : requestAnimationFrame(f)); requestAnimationFrame(f); }));
+    counts.push(await page.evaluate(() => window.dota3.renderer.info.memory.geometries));
+  }
+  check(counts.every((c) => c === counts[0]), 'число геометрий растёт от матча к матчу', counts);
+});
+
 await run(tests, boot);

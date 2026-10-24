@@ -25,16 +25,19 @@ const browser = await chromium.launch({
 
 // Открывает игру в мобильном горизонтальном окне и запускает матч.
 // start — id кнопки меню: 'playBtn' (матч 1 на 1) или 'practiceBtn' (тренировка с манекенами).
-export async function openGame({ start = 'playBtn' } = {}) {
-  const ctx = await browser.newContext({ viewport: { width: 844, height: 390 }, hasTouch: true, isMobile: true });
+// viewport — размер окна; settings — добавка к сохранённым настройкам;
+// setup(ctx) — до загрузки страницы, например чтобы перехватить запросы.
+export async function openGame({ start = 'playBtn', viewport = { width: 844, height: 390 }, settings = {}, setup } = {}) {
+  const ctx = await browser.newContext({ viewport, hasTouch: true, isMobile: true });
+  if (setup) await setup(ctx);
   // низкое качество графики: программный рендер в тестах медленный, а жесты чувствительны ко времени
-  await ctx.addInitScript(() => {
+  await ctx.addInitScript((extra) => {
     if (!sessionStorage.getItem('test-init')) {
       sessionStorage.setItem('test-init', '1');
       localStorage.clear();
-      localStorage.setItem('dota3-settings', JSON.stringify({ quality: 'low', mode: '1v1', vibration: false }));
+      localStorage.setItem('dota3-settings', JSON.stringify({ quality: 'low', mode: '1v1', vibration: false, ...extra }));
     }
-  });
+  }, settings);
   const page = await ctx.newPage();
   const errors = [];
   page.on('pageerror', (e) => errors.push(e.message));

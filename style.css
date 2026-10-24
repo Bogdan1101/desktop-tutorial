@@ -358,10 +358,13 @@ button:focus-visible { outline: 2px solid var(--gold); outline-offset: 2px; }
 
 /* --- отказ в применении умения: короткая строка над кнопками --- */
 #castFail {
-  position: absolute; right: 0; bottom: 254px; max-width: 260px; padding: 5px 10px; border-radius: 8px;
-  background: rgba(46, 10, 8, 0.92); border: 1px solid #ff6a5a; color: #ffe1dc;
-  font: 700 12px/1.25 var(--font-body); white-space: nowrap; pointer-events: none;
-  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.5); animation: castFailIn 0.16s ease-out;
+  /* место выбирает hud.placeCastFail: над кнопками умений или левее, в обход миникарты и кнопок */
+  position: absolute; right: calc(14px + var(--sr)); bottom: calc(270px + var(--sb));
+  width: max-content; max-width: min(250px, calc(100vw - 32px - var(--sl) - var(--sr)));
+  padding: 5px 10px; border-radius: 8px;
+  background: rgba(46, 10, 8, 0.94); border: 1px solid #ff6a5a; color: #ffe1dc;
+  font: 700 12px/1.3 var(--font-body); white-space: normal; overflow-wrap: break-word; text-wrap: pretty; pointer-events: none;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.5); animation: castFailIn 0.16s ease-out; z-index: 4;
 }
 #castFail b { color: #fff; font-family: var(--font-display); margin-right: 6px; }
 @keyframes castFailIn { from { transform: translateY(4px); opacity: 0; } }

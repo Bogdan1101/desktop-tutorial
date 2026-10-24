@@ -9,26 +9,34 @@
 <title>Дота 3</title>
 <link rel="manifest" href="manifest.webmanifest">
 <link rel="icon" href="icons/icon.svg" type="image/svg+xml">
+<script>
+  // Показывает ошибку на экране: так видно, что сломалось, даже на телефоне без консоли.
+  // Подключён до стилей, чтобы ловить и их загрузку. Ресурсы с data-optional (веб-шрифты)
+  // не нужны для игры: без них остаются системные шрифты, поэтому их сбой не показываем.
+  (function () {
+    var pending = [];
+    function show(msg) {
+      var el = document.getElementById('err');
+      if (!el) { if (pending.push(msg) === 1) addEventListener('DOMContentLoaded', function () { pending.splice(0).forEach(show); }); return; }
+      el.hidden = false;
+      el.textContent = (el.textContent ? el.textContent + '\n' : 'Ошибка: ') + msg;
+    }
+    addEventListener('error', function (e) {
+      var t = e.target;
+      if (t && t !== window && t.hasAttribute && t.hasAttribute('data-optional')) return;
+      var url = t && (t.src || t.href);
+      show(e.message || (url ? 'не загрузился ' + url : 'неизвестная'));
+    }, true);
+    addEventListener('unhandledrejection', function (e) { show(String(e.reason && e.reason.message || e.reason)); });
+  })();
+</script>
 <link rel="preconnect" href="https://fonts.googleapis.com">
-<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Rubik:wght@400;500;700&family=Unbounded:wght@600;800&display=swap">
+<link rel="stylesheet" data-optional href="https://fonts.googleapis.com/css2?family=Rubik:wght@400;500;700&family=Unbounded:wght@600;800&display=swap">
 <link rel="stylesheet" href="style.css">
 </head>
 <body>
 <!-- GAME:BEGIN -->
 <div id="err" hidden></div>
-<script>
-  // Показывает ошибку на экране: так видно, что сломалось, даже на телефоне без консоли
-  (function () {
-    function show(msg) {
-      var el = document.getElementById('err');
-      if (!el) return;
-      el.hidden = false;
-      el.textContent = (el.textContent ? el.textContent + '\n' : 'Ошибка: ') + msg;
-    }
-    addEventListener('error', function (e) { show(e.message || (e.target && e.target.src ? 'не загрузился ' + e.target.src : 'неизвестная')); }, true);
-    addEventListener('unhandledrejection', function (e) { show(String(e.reason && e.reason.message || e.reason)); });
-  })();
-</script>
 <canvas id="scene"></canvas>
 
 <div id="hud" hidden>
@@ -71,12 +79,12 @@
     <button class="rank" data-rank="E" id="rankE" hidden aria-label="Улучшить E">+</button>
     <button class="rank" data-rank="R" id="rankR" hidden aria-label="Улучшить R">+</button>
     <button class="act item-act" id="activeBtn" data-act="active" hidden aria-label="Песочные часы"><b>Часы</b><i class="cd"></i><em></em></button>
-    <div id="castFail" role="status" aria-live="polite" hidden></div>
     <button class="act spell" id="abS1"><b></b><i class="cd"></i><em></em></button>
     <button class="act spell" id="abS2"><b></b><i class="cd"></i><em></em></button>
   </div>
   <div id="aimCancel" hidden>Отмена</div>
   <div id="skillTip" hidden></div>
+  <div id="castFail" role="status" aria-live="polite" hidden></div>
 
   <div class="utility">
     <button class="util" data-act="recall" id="recallBtn">Домой</button>

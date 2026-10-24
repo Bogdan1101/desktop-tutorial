@@ -1,4 +1,4 @@
-# Проверки управления и боевых подсказок на настоящих касаниях в Chromium (tests/*.spec.mjs).
+# Проверки управления, боевых подсказок и интерфейса на телефонных экранах в Chromium (tests/*.spec.mjs).
 name: Tests
 
 on:
@@ -22,3 +22,4 @@ jobs:
       - run: npx playwright install --with-deps chromium
       - run: npm run test:input
       - run: npm run test:combat
+      - run: npm run test:ui

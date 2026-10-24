@@ -61,6 +61,7 @@ export class Hud {
     this.fail = null; // { key, reason, until, btn } — текущая строка отказа
     this.failShown = 0; // сколько раз строка появлялась заново (для проверок на «спам»)
     game.on('castrejected', (e) => { if (e.hero === game.player) this.onCastRejected(e); });
+    addEventListener('resize', () => this.placeCastFail());
     this.tipEl = $('skillTip');
     this.tipEl.hidden = true;
     this.tipKey = null;
@@ -180,6 +181,7 @@ export class Hud {
     const now = performance.now();
     const same = this.fail && this.fail.key === e.key && this.fail.reason === e.reason && now < this.fail.until;
     const btn = this.ab[e.key]?.btn;
+    if (this.tipKey) return; // открыто описание умения: оно важнее
     if (!same) {
       this.clearCastFeedback();
       this.failShown++;
@@ -193,6 +195,41 @@ export class Hud {
     k.textContent = e.key;
     this.failEl.replaceChildren(k, this.castFailText(e));
     this.fail = { key: e.key, reason: e.reason, until: now + 1400, btn };
+    this.placeCastFail();
+  }
+
+  // Строка отказа стоит над кнопками умений. Если там её задевает миникарта (низкий экран,
+  // крупные кнопки), она уходит левее кнопки E, над W и R. Выбирается первое место без наложений.
+  placeCastFail() {
+    const el = this.failEl;
+    if (el.hidden) return;
+    const vw = innerWidth, vh = innerHeight;
+    const vis = (e) => e && !e.hidden && e.offsetParent;
+    const box = (e) => e.getBoundingClientRect();
+    const ab = ['abQ', 'abW', 'abE', 'abR'].map($);
+    const obstacles = [...document.querySelectorAll('#hud .top > *, #actions .act, #actions .rank, #hud .utility, #practicePanel')]
+      .filter(vis).map(box);
+    const [, W, E, R] = ab.map(box);
+    const ranks = ['rankW', 'rankE', 'rankR'].map($).filter(vis).map(box);
+    const top = (rs) => Math.min(...rs.map((r) => r.top));
+    const gap = 6;
+    const spots = [
+      { right: vw - E.right, bottom: vh - top([...ab.map(box), ...ranks]) + gap },
+      { right: vw - E.left + gap, bottom: vh - top([W, R, ...ranks.filter((r) => r.right <= E.left)]) + gap },
+    ];
+    const hit = (a, b) => Math.max(0, Math.min(a.right, b.right) - Math.max(a.left, b.left)) * Math.max(0, Math.min(a.bottom, b.bottom) - Math.max(a.top, b.top));
+    let best = null;
+    for (const sp of spots) {
+      el.style.right = `${sp.right}px`;
+      el.style.bottom = `${sp.bottom}px`;
+      const r = box(el);
+      const out = Math.max(0, -r.left) + Math.max(0, -r.top) + Math.max(0, r.right - vw);
+      const cost = out * 1000 + obstacles.reduce((sum, o) => sum + hit(r, o), 0);
+      if (!best || cost < best.cost) best = { sp, cost };
+      if (!cost) break;
+    }
+    el.style.right = `${best.sp.right}px`;
+    el.style.bottom = `${best.sp.bottom}px`;
   }
 
   clearCastFeedback() {
@@ -205,6 +242,7 @@ export class Hud {
   setTip(key) {
     if (key === this.tipKey) return;
     this.tipKey = key;
+    if (key) this.clearCastFeedback();
     this.tipEl.hidden = !key;
     if (key) this.tipEl.replaceChildren(...(key[0] === 'S' ? spellTip(this.game.player, key) : abilityTip(this.game.player, key)));
   }

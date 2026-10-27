@@ -24,3 +24,4 @@ jobs:
       - run: npm run test:combat
       - run: npm run test:ui
       - run: npm run test:onboarding
+      - run: npm run test:hits

@@ -283,11 +283,13 @@ export class Hud {
     this.floats.push({ el, x: unit.pos.x + dx, z: unit.pos.z, h: unit.barHeight + 0.4, t: 0, life: 0.9 });
   }
 
-  onDamage({ target, source, amount, type, crit }) {
+  onDamage({ target, source, amount, type, crit, absorbed, lost }) {
     const p = this.game.player;
     if (amount < 1 || (source !== p && target !== p)) return;
     if (this.floats.length > 40) return;
-    const cls = target === p ? 'taken' : crit ? 'crit' : type === 'magic' ? 'magic' : type === 'true' ? 'true' : 'phys';
+    // удар целиком в щит: голубое число, здоровье не тронуто
+    const cls = absorbed > 0 && lost <= 0 ? 'absorb'
+      : target === p ? 'taken' : crit ? 'crit' : type === 'magic' ? 'magic' : type === 'true' ? 'true' : 'phys';
     this.addFloat(target, crit ? `${Math.round(amount)}!` : String(Math.round(amount)), cls, (Math.random() - 0.5) * 1.2);
   }
 

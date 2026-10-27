@@ -96,6 +96,7 @@ button:focus-visible { outline: 2px solid var(--gold); outline-offset: 2px; }
 .float.true { color: #fff; }
 .float.crit { color: #ffd84a; font-size: 17px; }
 .float.taken { color: #ff6a5a; font-size: 12px; }
+.float.absorb { color: #9fe8ff; font-size: 12px; font-style: italic; }
 
 #vignette {
   position: absolute; inset: 0; opacity: 0; transition: opacity 0.3s;

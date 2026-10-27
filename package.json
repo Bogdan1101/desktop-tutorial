@@ -8,7 +8,8 @@
     "test:input": "node tests/input.spec.mjs",
     "test:combat": "node tests/combat.spec.mjs",
     "test:ui": "node tests/ui.spec.mjs",
-    "test:onboarding": "node tests/onboarding.spec.mjs"
+    "test:onboarding": "node tests/onboarding.spec.mjs",
+    "test:hits": "node tests/hits.spec.mjs"
   },
   "devDependencies": {
     "@capacitor/android": "6.2.2",

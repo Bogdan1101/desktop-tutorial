@@ -89,8 +89,9 @@ export class Unit {
     const resist = type === 'physical' ? this.armor : type === 'magic' ? this.mr : 0;
     let dmg = raw * (100 / (100 + Math.max(0, resist)));
     const shown = dmg;
+    let absorbed = 0;
     if (this.shield > 0) {
-      const absorbed = Math.min(this.shield, dmg);
+      absorbed = Math.min(this.shield, dmg);
       this.shield -= absorbed;
       dmg -= absorbed;
     }
@@ -107,7 +108,11 @@ export class Unit {
       }
     }
     if (this.kind === 'monster') this.onAttacked(source);
-    this.game.emit('damage', { target: this, source, amount: shown, type, crit: !!opts.crit, dot: !!opts.dot });
+    // absorbed — ушло в щит, lost — снято со здоровья; basic/ability — чем ударили (для отклика на попадание)
+    this.game.emit('damage', {
+      target: this, source, amount: shown, type, crit: !!opts.crit, dot: !!opts.dot,
+      absorbed, lost: dmg, basic: !!opts.basic, ability: opts.ability ?? null,
+    });
     if (this.kind === 'dummy' && this.hp < 1) this.hp = 1; // манекен не умирает
     if (this.hp <= 0) {
       this.hp = 0;
@@ -172,7 +177,8 @@ export class Unit {
     const onHit = (t) => {
       t.takeDamage(dmg, 'physical', this, { basic: true, crit });
       if (this.hasBuff('red') && t.alive) t.slow(0.2, 1);
-      this.game.hitSpark(t, this.team === TEAM.NEUTRAL ? 0xffd27a : TEAM_GLOW[this.team]);
+      // у героев отклик рисует ImpactFx по событию урона; у крипов и монстров — прежняя вспышка
+      if (this.kind !== 'hero') this.game.hitSpark(t, this.team === TEAM.NEUTRAL ? 0xffd27a : TEAM_GLOW[this.team]);
     };
     this.anim = 0.25;
     if (this.ranged) {

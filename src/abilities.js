@@ -44,8 +44,9 @@ function damageOf(hero, def, rank) {
   return v * hero.outMul;
 }
 
-function spellHit(hero, target, amount, type) {
-  target.takeDamage(amount, type, hero);
+// ability — id умения, если у попадания есть свой отклик (ImpactFx); на урон не влияет
+function spellHit(hero, target, amount, type, ability = null) {
+  target.takeDamage(amount, type, hero, { ability });
   if (target.alive && hero.items.some((id) => ITEMS[id].spellSlow)) target.slow(0.2, 1);
 }
 
@@ -58,7 +59,7 @@ const IMPL = {
     const dmg = damageOf(hero, def, rank);
     game.addProjectile(new Skillshot(game, hero, dir, {
       range: def.range, speed: def.speed, width: def.width, color: 0xffa63d,
-      onHit: (u) => { spellHit(hero, u, dmg, def.type); game.burst(u.pos.x, u.pos.z, 0xffa63d, 1.6); },
+      onHit: (u) => spellHit(hero, u, dmg, def.type, 'fireball'),
     }));
     return true;
   },
@@ -101,9 +102,8 @@ const IMPL = {
         for (const u of game.units) {
           if (!u.canBeHitBy(hero.team) || u.isStructure) continue;
           if (dist(u.pos, hero.pos) <= u.radius + hero.radius + 0.4) {
-            spellHit(hero, u, dmg, def.type);
+            spellHit(hero, u, dmg, def.type, 'shieldBash');
             if (u.alive) u.stun(def.stun);
-            game.burst(u.pos.x, u.pos.z, 0xffd27a, 1.4);
             game.emit('boom', { x: u.pos.x, z: u.pos.z, big: false });
             hero.dash = null;
             return;
@@ -151,7 +151,7 @@ const IMPL = {
     const dmg = damageOf(hero, def, rank);
     game.addProjectile(new Skillshot(game, hero, dir, {
       range: def.range, speed: def.speed, width: def.width, pierce: true, color: 0xfff1a8, arrow: true,
-      onHit: (u) => { spellHit(hero, u, dmg, def.type); if (u.alive) u.slow(def.slow, def.slowTime); },
+      onHit: (u) => { spellHit(hero, u, dmg, def.type, 'volley'); if (u.alive) u.slow(def.slow, def.slowTime); },
     }));
     return true;
   },

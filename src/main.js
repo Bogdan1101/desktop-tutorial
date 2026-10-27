@@ -9,6 +9,7 @@ import { FogOverlay, AimIndicator, TargetMarker } from './overlays.js';
 import { loadSettings, saveSettings } from './settings.js';
 import { loadRobot, disposeObject } from './models.js';
 import { Tutorial } from './tutorial.js';
+import { ImpactFx } from './impacts.js';
 import {
   loadProfile, recordMatch, claimQuest, questDef, finishTutorial, buySkin, equipSkin, ownsSkin, equippedSkin, TUTORIAL_REWARD,
 } from './profile.js';
@@ -32,7 +33,7 @@ const camera = new THREE.PerspectiveCamera(36, 1, 0.5, 220);
 const CAM_OFFSET = new THREE.Vector3(0, 26, 15);
 const camTarget = new THREE.Vector3(-MAP.fountainX + 6, 0, 0);
 
-let scene, world, game, hud, fog, aim, marker, tutorial = null;
+let scene, world, game, hud, fog, aim, marker, impacts, tutorial = null;
 const input = new Input();
 let state = 'menu'; // menu | play | pause | end
 
@@ -66,6 +67,7 @@ function disposeScene(s) {
   game?.dispose();   // скелеты и анимации героев
   fog?.dispose();    // текстура тумана
   marker?.dispose(); // маркер цели: освобождает себя и уходит со сцены
+  impacts?.dispose(); // пул откликов на попадание
   disposeObject(s);  // остальное в сцене; общие ресурсы помечены shared и остаются
 }
 
@@ -292,6 +294,7 @@ function newMatch(opts = {}) {
   fog = new FogOverlay(scene);
   aim = new AimIndicator(scene);
   marker = new TargetMarker(scene);
+  impacts = new ImpactFx(scene, game, camera, { quality: settings.quality, reduced: matchMedia('(prefers-reduced-motion: reduce)').matches });
   hud = new Hud(game, camera);
   input.reset();
   const p = game.player;
@@ -305,7 +308,7 @@ function newMatch(opts = {}) {
   camTarget.set(p.pos.x + 6, 0, p.pos.z);
   $('practicePanel').hidden = game.mode !== 'practice' || !!opts.tutorial;
   // для автотестов: состояние матча, ввода и экрана
-  window.dota3 = { game, simulate, input, hud, marker, renderer, get state() { return state; }, get tutorial() { return tutorial; } };
+  window.dota3 = { game, simulate, input, hud, marker, impacts, renderer, get state() { return state; }, get tutorial() { return tutorial; } };
 }
 
 function bindEvents(g) {
@@ -527,6 +530,7 @@ function frame(now) {
   }
   // маркер цели атаки: только в идущем матче и только на видимую цель
   marker.update(state === 'play' && !game.over ? p.attackTarget : null, dt);
+  impacts.update(state === 'pause' ? 0 : dt); // на паузе отклики замирают вместе с игрой
   sound.listener = p.pos;
 
   const follow = state === 'menu' ? { x: Math.sin(now / 7000) * 34, z: Math.cos(now / 9000) * 6 } : p.pos;

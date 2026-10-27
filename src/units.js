@@ -988,13 +988,28 @@ export class Homing {
   dispose() { this.game.scene.remove(this.mesh); disposeObject(this.mesh); }
 }
 
+// Первая точка отрезка, где снаряд оказывается не дальше r от центра цели.
+// (fx, fz) — начало отрезка относительно цели, (dx, dz) — единичное направление, len — длина.
+// Возвращает расстояние от начала отрезка или null. Касание (ровно r) считается попаданием.
+export function segmentHit(fx, fz, dx, dz, len, r) {
+  const c = fx * fx + fz * fz - r * r;
+  if (c <= 0) return 0; // уже внутри в начале шага
+  const b = fx * dx + fz * dz;
+  if (b >= 0) return null; // цель позади или сбоку, и снаряд от неё удаляется
+  const disc = b * b - c;
+  if (disc < 0) return null;
+  const t = -b - Math.sqrt(disc);
+  return t <= len + 1e-9 ? Math.max(0, t) : null;
+}
+
 // Снаряд по прямой: бьёт первого врага или всех на пути (pierce)
 export class Skillshot {
   constructor(game, owner, dir, opts) {
     this.game = game;
     this.owner = owner;
     this.team = owner.team;
-    this.dir = dir;
+    const dl = Math.hypot(dir.x, dir.z) || 1;
+    this.dir = { x: dir.x / dl, z: dir.z / dl }; // единичный: расчёт попадания по отрезку на это опирается
     this.opts = opts; // { range, speed, width, pierce, heroOnly, color, size, onHit }
     this.left = opts.range;
     this.hit = new Set();
@@ -1004,22 +1019,38 @@ export class Skillshot {
     this.done = false;
     game.scene.add(this.mesh);
   }
+  // Непрерывная проверка: за шаг снаряд проходит отрезок (не дальше остатка дальности), и попадание
+  // ищется по всему отрезку, а не только в его конце. Иначе на долгом кадре снаряд перепрыгивал цели
+  // и бил за пределом дальности. Цели берутся в их положении на момент обновления снаряда: движение
+  // цели внутри шага не учитывается.
   update(dt) {
+    if (this.done) return;
     const o = this.opts;
-    const step = o.speed * dt;
-    this.pos.x += this.dir.x * step;
-    this.pos.z += this.dir.z * step;
-    this.left -= step;
-    for (const u of this.game.units) {
-      if (!u.canBeHitBy(this.team) || u.isStructure || this.hit.has(u)) continue;
-      if (o.heroOnly && u.kind !== 'hero') continue;
-      if (dist(this.pos, u.pos) <= u.radius + o.width) {
-        this.hit.add(u);
-        o.onHit(u, this);
-        if (!o.pierce) { this.done = true; return; }
-      }
+    const len = Math.max(0, Math.min(o.speed * dt, this.left));
+    const x0 = this.pos.x, z0 = this.pos.z, dx = this.dir.x, dz = this.dir.z;
+    // кого задевает отрезок и на каком расстоянии от начала шага
+    const hits = [];
+    this.game.units.forEach((u, order) => {
+      if (!this.canHit(u)) return;
+      const t = segmentHit(x0 - u.pos.x, z0 - u.pos.z, dx, dz, len, u.radius + o.width);
+      if (t !== null) hits.push({ u, t, order });
+    });
+    hits.sort((a, b) => a.t - b.t || a.order - b.order);
+    for (const { u, t } of hits) {
+      // предыдущее попадание могло убить цель или изменить игру: проверяем ещё раз
+      if (!this.canHit(u)) continue;
+      this.pos.x = x0 + dx * t; this.pos.z = z0 + dz * t; // снаряд в точке касания — там и вспышка
+      this.hit.add(u);
+      o.onHit(u, this);
+      if (!o.pierce) { this.left -= t; this.done = true; return; }
     }
-    if (this.left <= 0) this.done = true;
+    this.pos.x = x0 + dx * len; this.pos.z = z0 + dz * len;
+    this.left -= len;
+    if (this.left <= 1e-9) this.done = true;
+  }
+  canHit(u) {
+    if (!u.canBeHitBy(this.team) || u.isStructure || this.hit.has(u)) return false;
+    return !(this.opts.heroOnly && u.kind !== 'hero');
   }
   sync() {
     this.mesh.position.set(this.pos.x, this.pos.y, this.pos.z);

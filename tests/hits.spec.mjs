@@ -99,8 +99,8 @@ test('Залп по толпе: урон всем пятерым, отклико
     g.isVisible = () => true;
     window.five = enemies.map((u) => u.id);
     p.ranks.Q = 1; p.mana = p.maxMana; p.cast('Q', { dir: { x: 1, z: 0 } });
-    // мелкими шагами, как при обычной частоте кадров (в проверках время ускорено ×3 и кадры долгие)
-    for (let i = 0; i < 40; i++) g.update(1 / 60);
+    // длинными кадрами по 0,15 с: снаряд проверяет попадания по всему пройденному отрезку
+    for (let i = 0; i < 5; i++) g.update(0.15);
   });
   const hitIds = await page.evaluate(() => [...new Set(window.dmg.filter((d) => d.ability === 'volley').map((d) => d.tgt))]);
   const five = await page.evaluate(() => window.five);

@@ -288,7 +288,7 @@ for (const [width, height] of VIEWPORTS) {
         await t.frames(0.2);
         const m = await page.evaluate(() => {
           const box = document.getElementById('tutorialBox').getBoundingClientRect();
-          const hits = [...document.querySelectorAll('#hud .top > *, #actions .act, #actions .rank, #hud .utility > *')]
+          const hits = [...document.querySelectorAll('#hud .top > *, #actions .act, #actions .rank, #actions .util, #hud .utility > *')]
             .filter((e) => !e.hidden && e.offsetParent)
             .filter((e) => { const o = e.getBoundingClientRect(); return o.left < box.right && box.left < o.right && o.top < box.bottom && box.top < o.bottom; })
             .map((e) => e.id || e.className);

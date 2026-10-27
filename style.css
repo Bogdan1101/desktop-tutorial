@@ -182,7 +182,7 @@ button:focus-visible { outline: 2px solid var(--gold); outline-offset: 2px; }
 #rankW { right: 144px; bottom: 170px; }
 #rankE { right: 80px; bottom: 212px; }
 #rankR { right: 211px; bottom: 180px; }
-.item-act { width: 46px; height: 46px; right: 238px; bottom: 40px; border-color: #ffd36b; }
+.item-act { width: 46px; height: 46px; right: 4px; bottom: 152px; border-color: #ffd36b; } /* у правого края, над «Башней» — подальше от героя */
 .item-act b { font-size: 10px; }
 
 #aimCancel {
@@ -191,7 +191,9 @@ button:focus-visible { outline: 2px solid var(--gold); outline-offset: 2px; }
 }
 #aimCancel.hot { background: rgba(200, 30, 30, 0.75); border-style: solid; }
 
-.utility { position: absolute; left: 50%; bottom: calc(8px + var(--sb)); transform: translateX(-50%); display: flex; gap: 6px; }
+/* Лавка и быстрая покупка — колонкой слева вверху, под портретом: нижний центр остаётся под героем */
+.utility { position: absolute; left: calc(8px + var(--sl)); top: calc(76px + var(--st)); display: flex; flex-direction: column; align-items: flex-start; gap: 6px; }
+.util.quick { max-width: 140px; white-space: normal; text-align: left; line-height: 1.2; }
 .util {
   pointer-events: auto; touch-action: manipulation; border: 1px solid var(--panel-edge); background: var(--panel); cursor: pointer;
   padding: 7px 12px; border-radius: 9px; font-weight: 700; font-size: 13px; white-space: nowrap;
@@ -331,8 +333,10 @@ button:focus-visible { outline: 2px solid var(--gold); outline-offset: 2px; }
 .spell .ico { inset: 20%; }
 .spell .cd { position: absolute; inset: 0; border-radius: 50%; background: conic-gradient(rgba(0, 0, 0, 0.72) var(--p, 0%), transparent 0); pointer-events: none; }
 .spell em:not(:empty) { font-size: 13px; min-width: 26px; height: 26px; }
-#abS1 { right: 292px; bottom: 66px; }
-#abS2 { right: 292px; bottom: 120px; }
+/* Заклинания и «Домой» — нижним рядом кластера, ниже героя и левее Q; порядок слева направо: Домой, Z, X */
+#abS1 { right: 266px; bottom: 0; }
+#abS2 { right: 216px; bottom: 0; }
+.util.recall { position: absolute; right: 318px; bottom: 4px; min-width: 76px; text-align: center; }
 
 /* Обучение: окно под счётом, между панелью героя и миникартой и выше кнопок умений; касания проходят насквозь */
 #tutorialBox {
@@ -352,7 +356,7 @@ button:focus-visible { outline: 2px solid var(--gold); outline-offset: 2px; }
 @keyframes tutPulse { from { box-shadow: 0 0 0 3px var(--gold), 0 0 6px 1px rgba(233, 185, 73, 0.35); } }
 @media (prefers-reduced-motion: reduce) { .tut-focus { animation: none; } .tut-dir i { transition: none; } }
 
-#practicePanel { position: absolute; left: calc(8px + var(--sl)); top: calc(78px + var(--st)); display: grid; gap: 5px; }
+#practicePanel { position: absolute; left: calc(8px + var(--sl)); top: calc(166px + var(--st)); display: grid; gap: 5px; }
 #practicePanel .util { font-size: 11px; padding: 6px 9px; }
 
 .tag.small { font-size: 11px; margin-top: -6px; }

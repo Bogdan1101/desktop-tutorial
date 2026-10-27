@@ -498,4 +498,137 @@ test('все модули игры есть в списке офлайн-кэш�
   check(!r.missing.length, 'не кэшируются для офлайна', r.missing);
 });
 
+// --- раскладка кнопок и видимость героя ---------------------------------------------------
+// Рамка героя на экране (кольцо у ног и тело до верха модели) и все кнопки управления
+const layoutSnap = (page) => page.evaluate(() => {
+  const { hud, game } = window.dota3, p = game.player;
+  const pts = [[1.05, 0, 0], [-1.05, 0, 0], [0, 0, 1.05], [0, 0, -1.05], [0, p.model.top, 0]].map(([dx, y, dz]) => hud.project(p.pos.x + dx, y, p.pos.z + dz));
+  const body = { l: Math.min(...pts.map((q) => q.x)), r: Math.max(...pts.map((q) => q.x)), t: Math.min(...pts.map((q) => q.y)), b: Math.max(...pts.map((q) => q.y)) };
+  const ctrls = [...document.querySelectorAll('#hud .top > *, #actions button, #hud .utility button, #practicePanel')].filter((e) => !e.hidden && e.offsetParent)
+    .map((e) => { const r = e.getBoundingClientRect(); const cx = (r.left + r.right) / 2, cy = (r.top + r.bottom) / 2;
+      const hit = document.elementFromPoint(cx, cy);
+      return { id: e.id || e.className, l: r.left, r: r.right, t: r.top, b: r.bottom, w: r.width, own: e.contains(hit) || hit === e, top: !!e.closest('.top') }; });
+  const gap = (c) => Math.hypot(Math.max(0, c.l - body.r, body.l - c.r), Math.max(0, c.t - body.b, body.t - c.b));
+  return { body, ctrls: ctrls.map((c) => ({ ...c, gap: gap(c) })), vw: innerWidth, vh: innerHeight };
+});
+async function settleCamera(page, x = -20) {
+  await page.evaluate((x) => { const p = window.dota3.game.player; p.pos.x = x; p.pos.z = 0; window.__lastFoot = null; }, x);
+  await page.waitForFunction(() => {
+    const { hud, game } = window.dota3, p = game.player, s = hud.project(p.pos.x, 0, p.pos.z);
+    const ok = window.__lastFoot && Math.abs(s.x - window.__lastFoot.x) < 0.1 && Math.abs(s.y - window.__lastFoot.y) < 0.1;
+    window.__lastFoot = s;
+    return ok;
+  }, null, { polling: 'raf', timeout: 30000 });
+}
+
+for (const [width, height] of [[667, 375], [844, 390], [915, 412]]) {
+  test(`кнопки не закрывают героя на ${width}×${height} при размерах 0,8 / 1 / 1,3`, async ({ page }) => {
+    const bad = [];
+    // заклинания, «Домой» и предмет должны быть заметно в стороне от героя; Q/W/E/R не двигались —
+    // для них только отсутствие перекрытия (на 667×375 при 1,3 R стоит в ~20 px)
+    const far = new Set(['abS1', 'abS2', 'recallBtn', 'activeBtn']);
+    for (const scale of [0.8, 1, 1.3]) {
+      await page.evaluate((s) => { const r = document.getElementById('setButtons'); r.value = s; r.dispatchEvent(new Event('input')); }, scale);
+      await page.evaluate(() => { const g = window.dota3.game, p = g.player; p.gold = 9000; if (!p.items.includes('hourglass')) p.items.push('hourglass'); });
+      // на линии и у фонтана (там видна быстрая покупка)
+      for (const [where, x] of [['линия', -20], ['база', -62]]) {
+      await settleCamera(page, x);
+      await frames(page, 4);
+      const m = await layoutSnap(page);
+      const ids = m.ctrls.map((c) => c.id);
+      const need = ['abS1', 'abS2', 'recallBtn', 'activeBtn', 'shopBtn', 'atkBtn', 'abQ', 'abR', ...(where === 'база' ? ['quickBtn'] : [])];
+      for (const n of need) if (!ids.includes(n)) bad.push({ scale, where, missing: n });
+      for (const c of m.ctrls) {
+        if (c.gap < (far.has(c.id) ? 60 : 12)) bad.push({ scale, where, id: c.id, gap: Math.round(c.gap), why: 'близко к герою' });
+        if (c.l < 0 || c.t < 0 || c.r > m.vw || c.b > m.vh) bad.push({ scale, id: c.id, why: 'за краем экрана' });
+        if (!c.own && !c.top) bad.push({ scale, where, id: c.id, why: 'касание в центре уходит в другой элемент' });
+      }
+      // кнопки не налезают друг на друга. Верхняя панель — отдельный ряд; «+» улучшения и раньше
+      // заходил краем на соседнюю кнопку (rankQ на W), раскладка умений в этой задаче не менялась.
+      const list = m.ctrls.filter((c) => !c.top && !/^rank/.test(c.id));
+      for (let i = 0; i < list.length; i++) for (let j = i + 1; j < list.length; j++) {
+        const a = list[i], b = list[j];
+        if (a.l < b.r - 1 && b.l < a.r - 1 && a.t < b.b - 1 && b.t < a.b - 1) bad.push({ scale, overlap: [a.id, b.id] });
+      }
+      // выбранный размер соблюдён: Q и заклинания не уменьшены
+      const q = m.ctrls.find((c) => c.id === 'abQ'), s1 = m.ctrls.find((c) => c.id === 'abS1');
+      const k = scale * (height <= 400 ? 0.84 : 1);
+      if (Math.abs(q.w - 60 * k) > 1 || Math.abs(s1.w - 44 * k) > 1) bad.push({ scale, size: { q: q.w, s1: s1.w, want: [60 * k, 44 * k] } });
+      }
+    }
+    check(!bad.length, 'раскладка', bad.slice(0, 5));
+  }, { viewport: { width, height }, start: 'playBtn', settings: { mode: '1v1' } });
+}
+
+test('667×375, кнопки 1,3: движение с атакой, прицел и отмена Q, Вспышка, улучшение, Домой, лавка, предмет', async (t) => {
+  const { page } = t;
+  await page.evaluate(() => {
+    const g = window.dota3.game, p = g.player;
+    p.gold = 9000; p.items.push('hourglass');
+    window.ev = { manual: 0, flash: 0, casts: 0 };
+    g.on('manualcast', () => window.ev.manual++);
+    g.on('cast', ({ hero }) => { if (hero === p) window.ev.casts++; });
+    g.on('spell', ({ hero, id }) => { if (hero === p && id === 'flash') window.ev.flash++; });
+  });
+  await t.frames(0.3);
+  const c = async (sel) => t.center(sel);
+  // джойстик у самого края «Домой» не нажимает её и ведёт героя; одновременно зажата «Атака»
+  const rec = await page.evaluate(() => { const r = document.getElementById('recallBtn').getBoundingClientRect(); return { l: r.left, cy: (r.top + r.bottom) / 2 }; });
+  const joy = { x: rec.l - 14, y: rec.cy };
+  const x0 = await page.evaluate(() => window.dota3.game.player.pos.x);
+  await t.touch('touchStart', [{ ...joy, id: 1 }]);
+  await t.touch('touchMove', [{ x: joy.x + 60, y: joy.y, id: 1 }]);
+  const atk = await c('#atkBtn');
+  await t.touch('touchStart', [{ x: joy.x + 60, y: joy.y, id: 1 }, { ...atk, id: 2 }]);
+  await t.frames(0.6);
+  const mv = await page.evaluate(() => ({ x: window.dota3.game.player.pos.x, attack: window.dota3.input.read().attack, recall: !!window.dota3.game.player.recall }));
+  await t.touch('touchEnd', []);
+  check(mv.x > x0 + 0.5 && mv.attack && !mv.recall, 'движение с зажатой атакой у края «Домой»', { x0, ...mv });
+  // улучшить Q кнопкой «+»
+  await page.evaluate(() => { window.dota3.game.player.points = 1; });
+  await t.frames(0.2);
+  await t.tap(await c('#rankQ'));
+  await t.frames(0.2);
+  check(await page.evaluate(() => window.dota3.game.player.ranks.Q) === 1, 'улучшение Q');
+  // прицел Q и отмена
+  const q = await c('#abQ');
+  await t.burst([['touchStart', [{ ...q, id: 3 }]], ['touchMove', [{ x: q.x - 40, y: q.y - 20, id: 3 }]], ['touchMove', [{ x: q.x - 80, y: q.y - 40, id: 3 }]]]);
+  const cancel = await c('#aimCancel');
+  await t.touch('touchMove', [{ ...cancel, id: 3 }]);
+  await t.touch('touchEnd', []);
+  await t.frames(0.3);
+  check(await page.evaluate(() => window.ev.casts === 0 && window.dota3.game.player.cd.Q === 0), 'отмена Q');
+  // прицел Q и применение
+  await t.burst([['touchStart', [{ ...q, id: 4 }]], ['touchMove', [{ x: q.x - 40, y: q.y - 20, id: 4 }]], ['touchMove', [{ x: q.x - 80, y: q.y - 40, id: 4 }]], ['touchEnd', []]]);
+  await t.frames(0.4);
+  check(await page.evaluate(() => window.ev.manual === 1), 'ручной прицел Q');
+  // Вспышка протягиванием влево-вверх
+  const flashSel = await page.evaluate(() => (window.dota3.game.player.spells[0] === 'flash' ? '#abS1' : '#abS2'));
+  const f = await c(flashSel);
+  const before = await page.evaluate(() => ({ ...window.dota3.game.player.pos }));
+  await t.burst([['touchStart', [{ ...f, id: 5 }]], ['touchMove', [{ x: f.x - 30, y: f.y - 20, id: 5 }]], ['touchMove', [{ x: f.x - 70, y: f.y - 45, id: 5 }]], ['touchEnd', []]]);
+  await t.frames(0.4);
+  const after = await page.evaluate(() => ({ ...window.dota3.game.player.pos, flash: window.ev.flash }));
+  check(after.flash === 1 && after.x < before.x - 1 && after.z < before.z - 0.5, 'Вспышка в направлении протягивания', { before, after });
+  // предмет с действием, затем на базе быстрая покупка и лавка, вне базы — «Домой»
+  await t.frames(0.2);
+  await t.tap(await c('#activeBtn'));
+  await t.frames(0.3);
+  check(await page.evaluate(() => window.dota3.game.player.activeCd > 0), 'предмет с действием');
+  await page.evaluate(() => { const p = window.dota3.game.player; p.pos.x = -62; p.pos.z = 0; });
+  await page.waitForFunction(() => !document.getElementById('quickBtn').hidden);
+  const items = await page.evaluate(() => window.dota3.game.player.items.length);
+  await t.tap(await c('#quickBtn'));
+  await t.frames(0.2);
+  check(await page.evaluate((n) => window.dota3.game.player.items.length > n || window.dota3.game.player.gold < 9000, items), 'быстрая покупка');
+  await t.tap(await c('#shopBtn'));
+  await t.frames(0.2);
+  check(await page.evaluate(() => !document.getElementById('shop').hidden), 'лавка открылась');
+  await page.evaluate(() => { window.dota3.hud.toggleShop(false); const p = window.dota3.game.player; p.pos.x = -30; p.pos.z = 0; });
+  await t.frames(0.2);
+  await t.tap(await c('#recallBtn'));
+  await t.frames(0.3);
+  check(await page.evaluate(() => !!window.dota3.game.player.recall), '«Домой» запущено');
+}, { viewport: { width: 667, height: 375 }, settings: { buttons: 1.3, mode: '1v1' } });
+
 await run(tests, boot);

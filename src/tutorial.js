@@ -10,7 +10,7 @@ const GOLD = 0xffd84a;
 
 const STEPS = [
   { text: 'Изучите первое умение: нажмите «+» над кнопкой Q', focus: () => '#rankQ', done: (g, p) => p.ranks.Q > 0 },
-  { text: 'Купите предмет: нажмите золотую кнопку внизу экрана', focus: () => '#quickBtn', done: (g, p) => p.items.length > 0 },
+  { text: 'Купите предмет: нажмите золотую кнопку слева, под портретом', focus: () => '#quickBtn', done: (g, p) => p.items.length > 0 },
   { text: 'Идите к золотой метке у манекенов: ведите пальцем по левой половине экрана', goal: GOAL, done: (g, p) => dist(p.pos, GOAL) < 9 },
   { text: 'Ударьте манекен: удерживайте «Атака»', focus: () => '#atkBtn', done: (g, p, c) => c.hits >= 3 },
   { text: 'Коснитесь Q и сразу отпустите — умение сработает по ближайшей цели', focus: () => '#abQ', done: (g, p, c) => c.casts >= 1 },

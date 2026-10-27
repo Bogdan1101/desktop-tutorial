@@ -211,7 +211,7 @@ export class Hud {
     const vis = (e) => e && !e.hidden && e.offsetParent;
     const box = (e) => e.getBoundingClientRect();
     const ab = ['abQ', 'abW', 'abE', 'abR'].map($);
-    const obstacles = [...document.querySelectorAll('#hud .top > *, #actions .act, #actions .rank, #hud .utility, #practicePanel')]
+    const obstacles = [...document.querySelectorAll('#hud .top > *, #actions .act, #actions .rank, #actions .util, #hud .utility, #practicePanel')]
       .filter(vis).map(box);
     const [, W, E, R] = ab.map(box);
     const ranks = ['rankW', 'rankE', 'rankR'].map($).filter(vis).map(box);

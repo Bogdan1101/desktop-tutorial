@@ -26,7 +26,7 @@ async function boot(test) {
   // что сейчас на экране и сколько показано всего
   t.fx = () => page.evaluate(() => {
     const fx = window.dota3.impacts;
-    return { shown: fx.shown, kinds: window.spawned.slice(), active: fx.slots.filter((s) => s.root.visible).map((s) => s.kind) };
+    return { shown: fx.shown, kinds: window.spawned.slice(), active: fx.slots.filter((s) => s.active).map((s) => s.kind) };
   });
   // поставить врага-героя перед игроком
   t.enemyAt = (dx, dz = 0.3) => page.evaluate(([dx, dz]) => {
@@ -47,9 +47,13 @@ for (const [hero, kind, range] of [['pyro', 'ember', 4.5], ['grok', 'strike', 1.
     await t.enemyAt(range);
     await t.frames(0.2);
     const before = await t.fx();
-    await page.evaluate(() => { const g = window.dota3.game; g.player.basicAttack(g.heroes[1][0]); });
-    const atOnce = await t.fx();
-    if (hero !== 'grok') check(atOnce.shown === before.shown && !(await page.evaluate(() => window.dmg.length)), 'у снаряда отклик до попадания', atOnce);
+    // выстрел и проверка в одном вызове: между вызовами страницы может пройти кадр, и снаряд долетит
+    const atOnce = await page.evaluate(() => {
+      const g = window.dota3.game;
+      g.player.basicAttack(g.heroes[1][0]);
+      return { shown: window.dota3.impacts.shown, dmg: window.dmg.length };
+    });
+    if (hero !== 'grok') check(atOnce.shown === before.shown && atOnce.dmg === 0, 'у снаряда отклик до попадания', atOnce);
     await page.waitForFunction(() => window.dmg.length >= 1, null, { timeout: 10000 });
     const hit = await t.fx();
     check(hit.shown === before.shown + 1 && hit.kinds.join() === kind, 'один отклик нужной формы', { hit, before });
@@ -163,7 +167,9 @@ test('удар по цели в тумане не показывается', asy
   });
   await page.waitForFunction(() => window.hits >= 1, null, { timeout: 10000 });
   check(await page.evaluate(() => window.fogged), 'враг и монстр должны быть в тумане');
-  check((await t.fx()).shown === 0, 'отклик выдал место удара в тумане');
+  // отклик создан (он живёт по времени), но скрыт, пока цель в тумане
+  const hidden = await page.evaluate(() => window.dota3.impacts.slots.filter((s) => s.active).map((s) => s.root.visible));
+  check(hidden.every((v) => v === false), 'отклик выдал место удара в тумане', hidden);
 });
 
 test('пул ограничен: 60 ударов подряд — не больше 14 фигур, ресурсы не растут; пауза и меню', async (t) => {
@@ -173,7 +179,7 @@ test('пул ограничен: 60 ударов подряд — не боль�
   const batch = () => page.evaluate(() => {
     const g = window.dota3.game, e = g.heroes[1][0], fx = window.dota3.impacts;
     for (let i = 0; i < 60; i++) { e.hp = e.maxHp; g.player.basicAttack(e); }
-    return { active: fx.slots.filter((s) => s.root.visible).length, shown: fx.shown };
+    return { active: fx.slots.filter((s) => s.active).length, shown: fx.shown };
   });
   const geo = () => page.evaluate(() => { const i = window.dota3.renderer.info.memory; return i.geometries + '/' + i.textures; });
   await batch();
@@ -189,9 +195,9 @@ test('пул ограничен: 60 ударов подряд — не боль�
   await page.keyboard.press('Escape');
   await page.waitForFunction(() => window.dota3.state === 'pause');
   await page.evaluate(() => { const g = window.dota3.game; g.player.basicAttack(g.heroes[1][0]); });
-  const t0 = await page.evaluate(() => window.dota3.impacts.slots.find((s) => s.root.visible)?.t);
+  const t0 = await page.evaluate(() => window.dota3.impacts.slots.find((s) => s.active)?.t);
   await page.waitForTimeout(500);
-  const t1 = await page.evaluate(() => window.dota3.impacts.slots.find((s) => s.root.visible)?.t);
+  const t1 = await page.evaluate(() => window.dota3.impacts.slots.find((s) => s.active)?.t);
   check(t0 !== undefined && t0 === t1, 'на паузе отклик не должен идти', { t0, t1 });
   // выход в меню: пул старого матча снят со сцены и освобождён
   await page.evaluate(() => { window.oldFx = window.dota3.impacts; });
@@ -208,7 +214,7 @@ test('низкое качество и «меньше движения»: про
   const { a, b } = await page.evaluate(() => {
     const g = window.dota3.game, fx = window.dota3.impacts;
     g.player.basicAttack(g.heroes[1][0]);
-    const s = fx.slots.find((x) => x.root.visible);
+    const s = fx.slots.find((x) => x.active);
     const a = { kind: s.kind, sc: s.shapes.star.scale.x, sparks: s.sparks.some((m) => m.visible) };
     fx.update(0.08);
     return { a, b: { sc: s.shapes.star.scale.x, op: s.shapes.star.material.opacity } };

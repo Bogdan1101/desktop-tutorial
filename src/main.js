@@ -308,12 +308,15 @@ function newMatch(opts = {}) {
   camTarget.set(p.pos.x + 6, 0, p.pos.z);
   $('practicePanel').hidden = game.mode !== 'practice' || !!opts.tutorial;
   // для автотестов: состояние матча, ввода и экрана
-  window.dota3 = { game, simulate, input, hud, marker, impacts, renderer, get state() { return state; }, get tutorial() { return tutorial; } };
+  window.dota3 = { game, simulate, input, hud, marker, impacts, renderer, sound, get state() { return state; }, get tutorial() { return tutorial; } };
 }
 
 function bindEvents(g) {
   const p = g.player;
-  g.on('attack', (u) => { if (u.kind === 'hero') sound.play(u.heroId === 'lira' ? 'arrow' : u.ranged ? 'shoot' : 'hit', u.pos); });
+  // Звуки с места события — только если игроку видно это место (туман, кусты); иначе звук выдал бы
+  // скрытый бой. Общие объявления (смерть героя своей команды, дракон, здания, серии) звучат всегда.
+  const heard = (at) => g.shown(at);
+  g.on('attack', (u) => { if (u.kind === 'hero' && heard(u)) sound.play(u.heroId === 'lira' ? 'arrow' : u.ranged ? 'shoot' : 'hit', u.pos); });
   g.on('towershot', (t) => sound.play('tower', t.pos));
   g.on('damage', ({ source, target, crit, amount, dot }) => {
     if (dot) return;
@@ -322,12 +325,12 @@ function bindEvents(g) {
   });
   g.on('cast', ({ hero, id }) => {
     const map = { fireball: 'fireball', frost: 'frost', shield: 'shield', stoneSkin: 'shield', frenzy: 'buff', shieldBash: 'dash', roll: 'dash', volley: 'arrow', harpoon: 'arrow', meteor: 'fireball' };
-    if (map[id]) sound.play(map[id], hero.pos);
+    if (map[id] && heard(hero)) sound.play(map[id], hero.pos);
   });
-  g.on('spell', ({ hero, id }) => sound.play(id === 'flash' ? 'dash' : id === 'ignite' ? 'fireball' : 'shield', hero.pos));
-  g.on('boom', ({ x, z, big }) => sound.play(big ? 'boom' : 'smallboom', { x, z }));
+  g.on('spell', ({ hero, id }) => { if (heard(hero)) sound.play(id === 'flash' ? 'dash' : id === 'ignite' ? 'fireball' : 'shield', hero.pos); });
+  g.on('boom', ({ x, z, big, r, at }) => { if (heard(at ?? { x, z, r })) sound.play(big ? 'boom' : 'smallboom', { x, z }); });
   g.on('herokill', ({ victim, killer }) => {
-    sound.play('death', victim.pos);
+    if (victim.team === p.team || heard(victim)) sound.play('death', victim.pos);
     if (victim === p) { sound.play('bad'); vibrate(250); } else if (killer && killer.team === p.team) { sound.play('kill'); if (killer === p) vibrate([40, 60, 40]); }
   });
   g.on('structure', (t) => sound.play('structure', t.pos));
@@ -335,7 +338,7 @@ function bindEvents(g) {
   g.on('bought', ({ hero }) => { if (hero === p) sound.play('coin'); });
   g.on('monster', ({ monster, hero }) => { if (monster.monsterKind === 'dragon') sound.play('roar'); else if (hero === p) sound.play('buff'); });
   g.on('dragonspawn', () => sound.play('roar'));
-  g.on('active', ({ hero }) => sound.play('shield', hero.pos));
+  g.on('active', ({ hero }) => { if (heard(hero)) sound.play('shield', hero.pos); });
   g.on('plant', ({ hero }) => { if (hero === p) sound.play('buff'); });
   g.on('multikill', ({ hero }) => { if (hero.team === p.team) sound.play('kill'); });
 }

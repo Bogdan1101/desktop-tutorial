@@ -141,6 +141,7 @@ export class Game {
   computeVision() {
     const brushOf = new Map();
     for (const u of this.units) if (u.alive && !u.static) brushOf.set(u, brushAt(u.pos.x, u.pos.z));
+    this.visionSources = {};
     for (const team of [TEAM.BLUE, TEAM.RED]) {
       const set = this.visible[team];
       set.clear();
@@ -154,17 +155,47 @@ export class Game {
         if (b !== undefined && b >= 0) ownBrushes.add(b);
       }
       sources.push([side(team) * MAP.fountainX, 0, MAP.baseRadius + 2]);
+      this.visionSources[team] = { sources, ownBrushes };
       for (const u of this.units) {
         if (!u.alive || u.team === team) continue;
         if (u.static) { set.add(u); continue; } // здания видно всегда
-        const b = brushOf.get(u) ?? -1;
-        if (b >= 0 && !ownBrushes.has(b) && this.time > u.revealUntil) continue;
-        for (const [x, z, r] of sources) {
-          if (Math.hypot(u.pos.x - x, u.pos.z - z) <= r) { set.add(u); break; }
-        }
+        if (this.seesSpot(team, u.pos.x, u.pos.z, brushOf.get(u) ?? -1, this.time <= u.revealUntil)) set.add(u);
       }
     }
-    this.visionSources = null;
+  }
+
+  // --- Что показывать игроку. Правила те же, что у тумана войны (computeVision): ---------------
+  // «Местность видна» — точка в круге обзора своих юнитов или базы (это и дыры в затемнении).
+  // «Куст скрывает» — точка в кусте, где нет своих, скрыта, даже если местность вокруг видна;
+  // исключение — подсвеченный атакой юнит (revealUntil), как и для самих юнитов.
+  // Только для показа: урон, цели, ИИ и обзор этим не меняются.
+  seesSpot(team, x, z, brush = brushAt(x, z), revealed = false) {
+    if (team === TEAM.NEUTRAL) return true;
+    if (!this.visionSources) this.computeVision();
+    const v = this.visionSources[team];
+    if (brush >= 0 && !v.ownBrushes.has(brush) && !revealed) return false;
+    return v.sources.some(([sx, sz, r]) => Math.hypot(x - sx, z - sz) <= r);
+  }
+  // Круг на земле (зона удара): виден, если хоть часть круга попадает в видимую местность.
+  // Кусты не учитываются: предупреждение об опасности важнее, а центр круга сам по себе не выдаёт врага.
+  seesArea(team, x, z, r) {
+    if (team === TEAM.NEUTRAL) return true;
+    if (!this.visionSources) this.computeVision();
+    return this.visionSources[team].sources.some(([sx, sz, sr]) => Math.hypot(x - sx, z - sz) <= sr + r);
+  }
+  // Юнит в его текущем месте — так же, как его видит команда (в том числе погибший, для анимации смерти)
+  seesUnit(team, u) {
+    if (team === TEAM.NEUTRAL || u.team === team || u.static) return true;
+    if (u.alive) return this.visible[team].has(u);
+    return this.seesSpot(team, u.pos.x, u.pos.z, brushAt(u.pos.x, u.pos.z), this.time <= u.revealUntil);
+  }
+  // То же для команды игрока — для эффектов, звуков и тряски
+  get viewTeam() { return this.player?.team ?? TEAM.NEUTRAL; }
+  shown(at) {
+    if (!at) return true;
+    const t = this.viewTeam;
+    if (at.pos) return this.seesUnit(t, at);
+    return at.r ? this.seesArea(t, at.x, at.z, at.r) : this.seesSpot(t, at.x, at.z);
   }
 
   onHeroHitHero(attacker, victim) {
@@ -437,12 +468,16 @@ export class Game {
 
   addProjectile(p) { this.projectiles.push(p); }
 
-  burst(x, z, color, size) { this.effects.push(new Burst(this, x, 1, z, color, size)); }
+  // at — к чему привязана вспышка, для тумана войны: юнит (видна, пока виден он), { x, z, r } — зона,
+  // { x, z } — точка. Без at — точка (x, z). Видимость проверяется каждый кадр, пока вспышка жива.
+  burst(x, z, color, size, at = { x, z }) { this.effects.push(new Burst(this, x, 1, z, color, size, 0.35, at)); }
   hitSpark(target, color) {
-    this.effects.push(new Burst(this, target.pos.x, target.isStructure ? 2 : 1.2, target.pos.z, color, 0.6, 0.18));
+    this.effects.push(new Burst(this, target.pos.x, target.isStructure ? 2 : 1.2, target.pos.z, color, 0.6, 0.18, target));
   }
-  trail(hero) { this.effects.push(new Burst(this, hero.pos.x, 1, hero.pos.z, 0x9fe8ff, 1.4, 0.3)); }
-  shake(a) { this.shakeAmount = Math.max(this.shakeAmount, a); }
+  trail(hero) { this.effects.push(new Burst(this, hero.pos.x, 1, hero.pos.z, 0x9fe8ff, 1.4, 0.3, hero)); }
+  // Тряска камеры. at — откуда толчок: если игроку там ничего не видно, экран не трясётся.
+  // Без at — общее событие (нексус, башня), трясёт всегда.
+  shake(a, at = null) { if (this.shown(at)) this.shakeAmount = Math.max(this.shakeAmount, a); }
 
   updatePlants(dt) {
     for (const pl of this.plants) {
@@ -454,7 +489,7 @@ export class Game {
       h.heal(h.maxHp * PLANTS.heal);
       h.mana = Math.min(h.maxMana, h.mana + h.maxMana * PLANTS.mana);
       pl.readyAt = this.time + PLANTS.respawn;
-      this.burst(pl.x, pl.z, 0xff7ab6, 1.6);
+      this.burst(pl.x, pl.z, 0xff7ab6, 1.6, h); // видно, только если виден тот, кто сорвал
       this.emit('plant', { hero: h, plant: pl });
     }
   }

@@ -984,7 +984,8 @@ export class Homing {
     this.pos.x += dx / d * step; this.pos.y += dy / d * step; this.pos.z += dz / d * step;
     this.mesh.lookAt(t.pos.x, ty, t.pos.z);
   }
-  sync() { this.mesh.position.set(this.pos.x, this.pos.y, this.pos.z); }
+  // снаряд виден там, где игроку видна местность (и не в чужом кусте), — даже если стрелок скрыт
+  sync() { this.mesh.position.set(this.pos.x, this.pos.y, this.pos.z); this.mesh.visible = this.game.shown({ x: this.pos.x, z: this.pos.z }); }
   dispose() { this.game.scene.remove(this.mesh); disposeObject(this.mesh); }
 }
 
@@ -1054,6 +1055,7 @@ export class Skillshot {
   }
   sync() {
     this.mesh.position.set(this.pos.x, this.pos.y, this.pos.z);
+    this.mesh.visible = this.game.shown({ x: this.pos.x, z: this.pos.z }); // как у Homing
     if (!this.opts.arrow) this.mesh.rotation.x += 0.3;
   }
   dispose() { this.game.scene.remove(this.mesh); disposeObject(this.mesh); }
@@ -1084,14 +1086,21 @@ export class AreaStrike {
         if (!u.canBeHitBy(this.team) || u.isStructure) continue;
         if (Math.hypot(u.pos.x - this.x, u.pos.z - this.z) <= this.opts.radius + u.radius) this.opts.onHit(u);
       }
-      this.game.burst(this.x, this.z, this.opts.color, this.opts.radius * 1.1);
-      this.game.emit('boom', { x: this.x, z: this.z, big: this.opts.radius >= 4 });
-      if (this.opts.radius >= 4) this.game.shake(0.35);
+      const area = { x: this.x, z: this.z, r: this.opts.radius };
+      this.game.burst(this.x, this.z, this.opts.color, this.opts.radius * 1.1, area);
+      this.game.emit('boom', { x: this.x, z: this.z, big: this.opts.radius >= 4, r: this.opts.radius });
+      if (this.opts.radius >= 4) this.game.shake(0.35, area);
       this.done = true;
     }
   }
   sync() {
     const k = Math.max(0, this.t / this.opts.delay);
+    // Предупреждение видно целиком, если хоть часть круга попадает в видимую местность:
+    // опасность в видимой части нельзя прятать из-за того, что центр или кастер в тумане.
+    // Часть круга в тумане остаётся под затемнением тумана. Кастер этим не выдаётся.
+    const seen = this.game.shown({ x: this.x, z: this.z, r: this.opts.radius });
+    this.ring.visible = this.disc.visible = seen;
+    if (this.rock) this.rock.visible = seen;
     if (this.rock) this.rock.position.set(this.x - k * 6, 0.5 + k * 22, this.z);
     this.disc.scale.setScalar(1 - k * 0.8);
   }
@@ -1103,8 +1112,10 @@ export class AreaStrike {
 // Вспышка: расширяющаяся и тающая сфера
 const burstGeo = markShared(new THREE.IcosahedronGeometry(1, 1)); // одна на все вспышки
 export class Burst {
-  constructor(game, x, y, z, color, size, life = 0.35) {
+  // at — привязка для тумана войны (см. Game.burst); видимость проверяется каждый кадр
+  constructor(game, x, y, z, color, size, life = 0.35, at = { x, z }) {
     this.game = game;
+    this.at = at;
     this.life = life;
     this.t = 0;
     this.size = size;
@@ -1122,6 +1133,7 @@ export class Burst {
     const k = this.t / this.life;
     this.mesh.scale.setScalar(this.size * (0.3 + k * 0.7));
     this.mesh.material.opacity = 0.8 * (1 - k);
+    this.mesh.visible = this.game.shown(this.at);
   }
   dispose() {
     this.game.scene.remove(this.mesh);
@@ -1133,6 +1145,7 @@ export class Burst {
 export class DeathAnim {
   constructor(game, unit, removeAfter) {
     this.game = game;
+    this.unit = unit;
     this.model = unit.model;
     this.group = unit.model.group;
     this.removeAfter = removeAfter;
@@ -1150,6 +1163,8 @@ export class DeathAnim {
   }
   sync() {
     const k = Math.min(1, this.t / this.life);
+    // падение видно так же, как был бы виден юнит на этом месте (туман, кусты)
+    this.group.visible = this.game.seesUnit(this.game.viewTeam, this.unit);
     if (this.skeletal) { this.group.position.y = k > 0.7 ? -(k - 0.7) * 3 : 0; return; }
     this.group.rotation.z = this.dir * Math.min(1, k * 2.5) * 1.45;
     this.group.position.y = k > 0.5 ? -(k - 0.5) * 3 : 0;

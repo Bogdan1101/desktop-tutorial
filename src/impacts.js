@@ -3,7 +3,8 @@
 //   Пиро — тёплое кольцо и искры (магия), Грок — четырёхлучевая «звезда» удара, Лира — узкий след стрелы
 //   по направлению выстрела. Удар, целиком ушедший в щит, — голубой шестиугольник без формы урона.
 // Пул фигур создаётся один раз на матч и переиспользуется: ничего не создаётся во время боя.
-// Не показывается: промах (нет события урона), урон по времени, цель в тумане или в чужих кустах.
+// Не показывается: промах (нет события урона), урон по времени. Пока цель в тумане или в чужих кустах,
+// отклик скрыт (но живёт и гаснет по времени).
 import * as THREE from 'three';
 
 const KINDS = {
@@ -73,7 +74,7 @@ export class ImpactFx {
       for (let k = 0; k < SPARKS; k++) sparks.push(new THREE.Mesh(this.geo.spark, mat(0xffffff)));
       for (const m of [...Object.values(shapes), ...sparks]) { m.renderOrder = 5; m.visible = false; root.add(m); }
       this.group.add(root);
-      this.slots.push({ root, shapes, sparks, t: 0, life: 0, kind: null, mine: false, used: [] });
+      this.slots.push({ root, shapes, sparks, t: 0, life: 0, kind: null, mine: false, used: [], active: false, target: null });
     }
     this.casts = new Map(); // (источник, умение) → { at, n } — предел откликов одного умения
     this.shown = 0;         // для проверок: сколько откликов показано за матч
@@ -88,8 +89,6 @@ export class ImpactFx {
     const kind = e.ability ? BY_ABILITY[e.ability] : e.basic ? BY_HERO[source.heroId] : null;
     if (!kind) return;
     const g = this.game, p = g.player;
-    // в тумане и в чужих кустах удар не показываем: иначе выдали бы, где враг
-    if (!g.isVisible(p.team, target)) return;
     const mine = source === p || target === p;
     if (e.ability) {
       const key = source.id + ':' + e.ability;
@@ -102,6 +101,7 @@ export class ImpactFx {
     const shieldOnly = e.absorbed > 0 && e.lost <= 0;
     const scale = (e.ability ? BIG[e.ability] : 1) * (target.kind === 'hero' ? 1 : 0.85) * (e.crit ? 1.15 : 1);
     const dx = target.pos.x - source.pos.x, dz = target.pos.z - source.pos.z;
+    slot.target = target;
     this.spawn(slot, shieldOnly ? 'shield' : kind, target, scale, dx, dz, mine);
   }
 
@@ -109,7 +109,7 @@ export class ImpactFx {
   pick(mine) {
     let free = null, oldest = null, others = 0;
     for (const s of this.slots) {
-      if (s.root.visible) {
+      if (s.active) {
         if (!s.mine) others++;
         if (!oldest || s.t / s.life > oldest.t / oldest.life) oldest = s;
       } else if (!free) free = s;
@@ -125,7 +125,8 @@ export class ImpactFx {
     const y = target.isStructure ? 2 : Math.min(1.4, (target.barHeight ?? 2) * 0.45);
     s.root.position.set(target.pos.x, y, target.pos.z);
     s.root.quaternion.copy(this.camera.quaternion); // плоская фигура лицом к камере
-    s.root.visible = true;
+    s.active = true;
+    s.root.visible = this.seen(s);
     for (const m of [...Object.values(s.shapes), ...s.sparks]) m.visible = false;
     s.used = [];
     const show = (m, c) => { m.visible = true; m.material.color.setHex(c); m.material.opacity = 1; m.scale.setScalar(1); m.position.set(0, 0, 0); m.rotation.set(0, 0, 0); s.used.push(m); };
@@ -166,16 +167,21 @@ export class ImpactFx {
     if (s.sparkDirs) s.sparkDirs.forEach(([x, y], i) => s.sparks[i].position.set(x * (0.3 + k * 0.7) * sc, y * (0.3 + k * 0.7) * sc, 0));
   }
 
+  // Отклик привязан к цели: виден, пока цель видна команде игрока (туман, кусты). Скрытый отклик
+  // идёт и гаснет как обычно — если цель за это время выйдет из тумана, он станет виден.
+  seen(s) { return this.game.seesUnit(this.game.viewTeam, s.target); }
+
   update(dt) {
     for (const s of this.slots) {
-      if (!s.root.visible) continue;
+      if (!s.active) continue;
       s.t += dt;
-      if (s.t >= s.life) { s.root.visible = false; continue; }
+      if (s.t >= s.life) { s.active = false; s.root.visible = false; s.target = null; continue; }
+      s.root.visible = this.seen(s);
       this.apply(s);
     }
   }
 
-  get active() { return this.slots.filter((s) => s.root.visible).length; }
+  get active() { return this.slots.filter((s) => s.active).length; }
 
   // Матч заменён: снять подписку, убрать фигуры и освободить свои геометрии и материалы
   dispose() {

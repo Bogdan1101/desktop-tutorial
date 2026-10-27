@@ -286,6 +286,9 @@ export class Hud {
   onDamage({ target, source, amount, type, crit, absorbed, lost }) {
     const p = this.game.player;
     if (amount < 1 || (source !== p && target !== p)) return;
+    // число над скрытой целью выдало бы, где она: урон игрока по невидимой цели не подписываем.
+    // Полученный игроком урон показывается всегда.
+    if (target !== p && !this.game.seesUnit(p.team, target)) return;
     if (this.floats.length > 40) return;
     // удар целиком в щит: голубое число, здоровье не тронуто
     const cls = absorbed > 0 && lost <= 0 ? 'absorb'

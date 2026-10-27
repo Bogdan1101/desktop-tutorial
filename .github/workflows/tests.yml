@@ -26,3 +26,4 @@ jobs:
       - run: npm run test:onboarding
       - run: npm run test:hits
       - run: npm run test:projectile
+      - run: npm run test:visibility

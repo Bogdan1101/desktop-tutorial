@@ -104,7 +104,7 @@ const IMPL = {
           if (dist(u.pos, hero.pos) <= u.radius + hero.radius + 0.4) {
             spellHit(hero, u, dmg, def.type, 'shieldBash');
             if (u.alive) u.stun(def.stun);
-            game.emit('boom', { x: u.pos.x, z: u.pos.z, big: false });
+            game.emit('boom', { x: u.pos.x, z: u.pos.z, big: false, at: u });
             hero.dash = null;
             return;
           }
@@ -119,7 +119,7 @@ const IMPL = {
     hero.addBuff('stoneSkin', def.duration, { stats: { armor: v, mr: v } });
     hero.shield = hero.maxHp * def.hpShield;
     hero.shieldUntil = game.time + def.duration;
-    game.burst(hero.pos.x, hero.pos.z, 0xb8b0a0, 1.6);
+    game.burst(hero.pos.x, hero.pos.z, 0xb8b0a0, 1.6, hero);
     return true;
   },
   quake(game, hero, def, rank) {
@@ -131,9 +131,11 @@ const IMPL = {
         if (u.alive) u.knockback(hero.pos.x, hero.pos.z, def.knockback);
       }
     }
-    game.burst(hero.pos.x, hero.pos.z, 0xd9b38c, def.radius);
-    game.emit('boom', { x: hero.pos.x, z: hero.pos.z, big: false });
-    game.shake(0.2);
+    // мгновенный удар вокруг себя привязан к кастеру: виден, если виден он. Видимые жертвы всё равно
+    // получают свои числа и вспышки; игрока, попавшего под удар, тряхнёт и из тумана.
+    game.burst(hero.pos.x, hero.pos.z, 0xd9b38c, def.radius, hero);
+    game.emit('boom', { x: hero.pos.x, z: hero.pos.z, big: false, at: hero });
+    game.shake(0.2, dist(game.player.pos, hero.pos) <= def.radius + game.player.radius ? null : hero);
     return true;
   },
   earthquake(game, hero, def, rank) {
@@ -167,7 +169,7 @@ const IMPL = {
   },
   frenzy(game, hero, def, rank) {
     hero.addBuff('frenzy', def.duration, { stats: { as: def.attackSpeed[rank - 1] } });
-    game.burst(hero.pos.x, hero.pos.z, 0xfff1a8, 1.2);
+    game.burst(hero.pos.x, hero.pos.z, 0xfff1a8, 1.2, hero);
     return true;
   },
   harpoon(game, hero, def, rank, aim) {
@@ -176,7 +178,7 @@ const IMPL = {
     const dmg = damageOf(hero, def, rank);
     game.addProjectile(new Skillshot(game, hero, dir, {
       range: def.range, speed: def.speed, width: def.width, heroOnly: true, color: 0x9fe8ff, arrow: true,
-      onHit: (u) => { spellHit(hero, u, dmg, def.type); if (u.alive) u.stun(def.stun); game.burst(u.pos.x, u.pos.z, 0x9fe8ff, 2); game.shake(0.25); },
+      onHit: (u) => { spellHit(hero, u, dmg, def.type); if (u.alive) u.stun(def.stun); game.burst(u.pos.x, u.pos.z, 0x9fe8ff, 2, u); game.shake(0.25, u); },
     }));
     return true;
   },
@@ -212,31 +214,31 @@ export function castSpell(game, hero, id, aim) {
     // скачок на полную длину или до последней проходимой точки
     let d = def.distance;
     while (d > 0.5 && !isWalkable(hero.pos.x + dir.x * d, hero.pos.z + dir.z * d, hero.radius * 0.8)) d -= 0.5;
-    game.burst(hero.pos.x, hero.pos.z, 0xfff6a8, 1.2);
+    game.burst(hero.pos.x, hero.pos.z, 0xfff6a8, 1.2); // точка отлёта: видна, если видно это место
     hero.pos.x += dir.x * d;
     hero.pos.z += dir.z * d;
     hero.facing = Math.atan2(dir.x, dir.z);
     hero.cancelRecall();
-    game.burst(hero.pos.x, hero.pos.z, 0xfff6a8, 1.4);
+    game.burst(hero.pos.x, hero.pos.z, 0xfff6a8, 1.4, hero);
     return true;
   }
   if (id === 'heal') {
     hero.heal(def.heal(hero.level));
     hero.addBuff('healSpeed', 2, { stats: { speed: 2 } });
-    game.burst(hero.pos.x, hero.pos.z, 0x7dff9a, 1.8);
+    game.burst(hero.pos.x, hero.pos.z, 0x7dff9a, 1.8, hero);
     return true;
   }
   if (id === 'barrier') {
     hero.shield = Math.max(hero.shield, def.shield(hero.level));
     hero.shieldUntil = game.time + 2;
-    game.burst(hero.pos.x, hero.pos.z, 0xfff1c0, 1.6);
+    game.burst(hero.pos.x, hero.pos.z, 0xfff1c0, 1.6, hero);
     return true;
   }
   if (id === 'ignite') {
     const t = hero.aimTarget(def.range, true);
     if (!t) return false;
     t.burn(def.damage(hero.level) / def.duration, def.duration, hero);
-    game.burst(t.pos.x, t.pos.z, 0xff6a2a, 1.3);
+    game.burst(t.pos.x, t.pos.z, 0xff6a2a, 1.3, t);
     return true;
   }
   return false;

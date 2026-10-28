@@ -18,6 +18,9 @@ export class HeroBrain {
     this.path = null;
     this.pathGoal = null;
     this.pathTime = -9;
+    this.hpLog = [];
+    this.retreatCause = null;
+    this.retreatUntil = -9;
   }
 
   get forward() { return -side(this.hero.team); }
@@ -41,6 +44,44 @@ export class HeroBrain {
   visibleEnemyHeroes(range, from = this.hero.pos) {
     const g = this.game, h = this.hero;
     return g.enemyHeroes(h.team).filter((e) => e.alive && g.isVisible(h.team, e) && dist(e.pos, from) < range);
+  }
+
+  // Входящий урон в секунду. Только то, что герой знает честно: собственные потери здоровья
+  // за последние ~1.5 с и видимые угрозы — враги-герои в досягаемости, крипы и башня, бьющие его.
+  incomingDps() {
+    const g = this.game, h = this.hero;
+    const log = this.hpLog;
+    log.push([g.time, h.hp]);
+    while (log.length > 2 && g.time - log[0][0] > 1.5) log.shift();
+    const span = g.time - log[0][0];
+    const felt = span > 0.2 ? Math.max(0, log[0][1] - h.hp) / span : 0;
+    const phys = 100 / (100 + Math.max(0, h.armor));
+    let seen = 0;
+    for (const e of this.visibleEnemyHeroes(14)) {
+      if (h.edgeDist(e) > e.range + 3) continue;
+      seen += e.ad * e.attackSpeed * phys + e.ap * 0.3 + 12 * e.level;
+    }
+    for (const u of g.units) {
+      if (!u.alive || u.team === h.team || u.target !== h) continue;
+      if (u.kind === 'creep' && g.isVisible(h.team, u)) seen += u.ad * u.attackSpeed * phys;
+      else if (u.kind === 'tower') seen += TOWER.damage * (1 + u.heroStreak * TOWER.heroRampPerShot) / TOWER.cooldown * phys;
+    }
+    return Math.max(felt, seen);
+  }
+
+  // Пора выходить из боя: при таком уроне герой проживёт меньше нескольких секунд,
+  // а видимая цель не умрёт заметно раньше. Порог мягче у осторожных (лёгкая сложность).
+  threatened(dps) {
+    const h = this.hero;
+    if (dps <= 0) return false;
+    const ttd = h.hp / dps;
+    if (ttd > 2.0 / this.diff.aggression) return false;
+    const t = this.target;
+    if (t && t.kind === 'hero' && t.alive && h.edgeDist(t) <= h.range + 0.5) {
+      const ours = h.ad * h.attackSpeed * (100 / (100 + Math.max(0, t.armor))) + 12 * h.level;
+      if (t.hp / ours < ttd * 0.8) return false;
+    }
+    return true;
   }
 
   update(dt) {
@@ -104,8 +145,23 @@ export class HeroBrain {
     const d = Math.hypot(dx, dz);
     if (d <= stop && tx === x) return;
     if (d < 0.01) return;
-    h.intent.mx = dx / d;
-    h.intent.mz = dz / d;
+    let mx = dx / d, mz = dz / d;
+    // Упёрлись (в союзника лоб в лоб, в здание): ненадолго шагаем вбок, потом снова к цели
+    const g = this.game;
+    const s = this.stall ??= { x: h.pos.x, z: h.pos.z, t: g.time, last: g.time, until: -9, sgn: h.id % 2 ? 1 : -1 };
+    if (g.time - s.last > 0.2) { s.x = h.pos.x; s.z = h.pos.z; s.t = g.time; } // окно меряем только пока идём
+    s.last = g.time;
+    if (g.time - s.t > 0.6) {
+      if (Math.hypot(h.pos.x - s.x, h.pos.z - s.z) < h.speed * 0.6 * 0.25 && g.time > s.until) { s.until = g.time + 0.7; s.sgn = -s.sgn; }
+      s.x = h.pos.x; s.z = h.pos.z; s.t = g.time;
+    }
+    if (g.time < s.until) {
+      const sx = mx * 0.4 - mz * s.sgn, sz = mz * 0.4 + mx * s.sgn;
+      const sl = Math.hypot(sx, sz);
+      mx = sx / sl; mz = sz / sl;
+    }
+    h.intent.mx = mx;
+    h.intent.mz = mz;
   }
 
   // Сила стороны в драке: здоровье × урон героев рядом с точкой
@@ -169,18 +225,26 @@ export class HeroBrain {
     const nearest = enemies.sort((a, b) => dist(a.pos, h.pos) - dist(b.pos, h.pos))[0];
     const eDist = nearest ? dist(nearest.pos, h.pos) : Infinity;
 
-    // Отступление
+    // Отступление: от низкого здоровья или от угрозы, которую не пережить
     const losing = enemies.length && this.power(1 - h.team, h.pos, 12) > this.power(h.team, h.pos, 12) * 1.3;
     const lowHp = hpPct < 0.28 || (losing && hpPct < 0.45);
-    if (lowHp || this.mode === 'retreat') {
-      if (!lowHp && hpPct > 0.7) this.mode = 'lane';
+    const dps = this.incomingDps();
+    const danger = !lowHp && this.threatened(dps);
+    if (lowHp) this.retreatCause = 'hp';
+    else if (danger) { if (this.mode !== 'retreat') this.retreatCause = 'threat'; this.retreatUntil = g.time + 2.5; }
+    if (lowHp || danger || this.mode === 'retreat') {
+      const done = this.retreatCause === 'threat'
+        ? !danger && g.time > this.retreatUntil && hpPct >= 0.5
+        : !lowHp && hpPct > 0.7;
+      if (done) { this.mode = 'lane'; this.retreatCause = null; }
       else {
         this.mode = 'retreat';
         if (h.inBase) { this.mode = 'heal'; return; }
         const enemiesClose = g.units.some((u) => u.canBeHitBy(h.team) && u.kind !== 'monster' && !u.isStructure
           && g.isVisible(h.team, u) && dist(u.pos, h.pos) < 10);
         const underAttack = g.time - h.lastDamagedAt < 1.5;
-        if (!enemiesClose && !underAttack && !h.recall) { h.intent.recall = true; this.goal = null; return; }
+        const wantsBase = this.retreatCause === 'hp' || hpPct < 0.5;
+        if (wantsBase && !enemiesClose && !underAttack && !h.recall) { h.intent.recall = true; this.goal = null; return; }
         if (h.recall) return;
         this.goal = { x: fountainX, z: 0 };
         this.useSpellsDefensive(eDist);

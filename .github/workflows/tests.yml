@@ -27,3 +27,4 @@ jobs:
       - run: npm run test:hits
       - run: npm run test:projectile
       - run: npm run test:visibility
+      - run: npm run test:ai

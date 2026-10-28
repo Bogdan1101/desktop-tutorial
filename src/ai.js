@@ -21,6 +21,7 @@ export class HeroBrain {
     this.hpLog = [];
     this.retreatCause = null;
     this.retreatUntil = -9;
+    this.dragonCommit = false;
   }
 
   get forward() { return -side(this.hero.team); }
@@ -82,6 +83,36 @@ export class HeroBrain {
       if (t.hp / ours < ttd * 0.8) return false;
     }
     return true;
+  }
+
+  aliveCount(team) { return this.game.heroes[team].filter((u) => u.alive).length; }
+
+  // Следующее здание врага, которое уже можно бить (здания видны всегда).
+  // Открытый нексус важнее восстановившегося ингибитора: он заканчивает матч.
+  nextEnemyStructure() {
+    const h = this.hero;
+    let best = null;
+    for (const u of this.game.units) {
+      if (!u.isStructure || !u.canBeHitBy(h.team)) continue;
+      if (u.kind === 'nexus') return u;
+      if (!best || u.order < best.order) best = u;
+    }
+    return best;
+  }
+
+  // Командный натиск по открытой информации: сколько героев живо у каждой стороны (о каждом убийстве
+  // объявляют всем, время возрождения зависит от уровня, который виден на табло)
+  // и какое здание следующее. После выигранной драки — к зданию, открытый нексус — добивать.
+  siegeTarget() {
+    const h = this.hero;
+    const s = this.nextEnemyStructure();
+    if (!s || h.hp / h.maxHp < 0.45) return null;
+    const mine = this.aliveCount(h.team), theirs = this.aliveCount(1 - h.team);
+    const adv = mine - theirs;
+    if (theirs === 0 || adv >= 2 || (adv >= 1 && s.order >= 2)) return s;
+    // поровну, но своя волна уже у ингибитора или нексуса — идём с ней
+    if (adv >= 0 && s.order >= 2 && this.game.units.some((u) => u.alive && u.kind === 'creep' && u.team === h.team && dist(u.pos, s.pos) < 10)) return s;
+    return null;
   }
 
   update(dt) {
@@ -264,8 +295,9 @@ export class HeroBrain {
     if (h.recall) return;
 
     // Бегство из-под башни
+    const siege = this.siegeTarget();
     const tower = this.towerDanger(h.pos.x, h.pos.z);
-    if (tower && tower.target === h) {
+    if (tower && tower.target === h && !(siege && hpPct > 0.6)) {
       this.goal = { x: tower.pos.x - f * (TOWER.range + 4), z: h.pos.z * 0.5 };
       return;
     }
@@ -292,9 +324,49 @@ export class HeroBrain {
       }
     }
 
+    if (siege && this.siege(siege)) return;
+    if (this.dragonPlan()) return;
     if (this.role === 'jungle' && this.jungle()) return;
     if (this.role === 'lane' && this.helpAlly()) return;
     this.lane();
+  }
+
+  // Дракон командой. В одиночку его не взять, а уход посреди боя — потерянное время.
+  // Начинаем, когда рядом с логовом двое своих (или лесник уже силён), никого из врагов не видно,
+  // и держим решение, пока дракон жив, здоровье есть и враги не появились.
+  dragonPlan() {
+    const g = this.game, h = this.hero;
+    const dragon = g.camps.find((c) => c.kind === 'dragon')?.monster;
+    const quit = () => { this.dragonCommit = false; return false; };
+    if (!dragon || !dragon.alive || h.hp / h.maxHp < 0.4 || this.visibleEnemyHeroes(16, dragon.pos).length) return quit();
+    if (this.aliveCount(h.team) < this.aliveCount(1 - h.team)) return quit();
+    const ready = (u) => u.alive && u.hp / u.maxHp > 0.55 && dist(u.pos, dragon.pos) < 30;
+    const allies = g.heroes[h.team].filter((u) => u !== h);
+    const allyOnIt = g.brains.some((b) => b.hero !== h && b.hero.team === h.team && b.hero.alive && b.mode === 'dragon');
+    if (!this.dragonCommit) {
+      if (!ready(h)) return false;
+      const crew = 1 + allies.filter(ready).length;
+      const start = allyOnIt || (this.role === 'jungle' && h.level >= 6 && (crew >= 2 || h.level >= 11));
+      if (!start) return false;
+      this.dragonCommit = true;
+    }
+    this.mode = 'dragon';
+    this.target = dragon;
+    this.useAbilities(dragon, ['R', 'Q', 'W', 'E']);
+    return true;
+  }
+
+  // Идти к зданию и бить его. Добиваем крипов по пути, но здание важнее фарма.
+  siege(s) {
+    const h = this.hero;
+    this.mode = 'siege';
+    if (h.edgeDist(s) <= h.range + 0.3) { this.target = s; return true; }
+    const creep = this.bestCreep();
+    if (creep && creep.hp <= h.ad && h.edgeDist(creep) <= h.range) { this.target = creep; return true; }
+    const d = dist(s.pos, h.pos) || 1;
+    const reach = h.range + s.radius + h.radius - 0.4;
+    this.goal = { x: s.pos.x + (h.pos.x - s.pos.x) / d * reach, z: s.pos.z + (h.pos.z - s.pos.z) / d * reach };
+    return true;
   }
 
   useSpellsOffensive(e) {
@@ -336,14 +408,7 @@ export class HeroBrain {
   jungle() {
     const g = this.game, h = this.hero;
     if (this.helpAlly()) return true;
-    // дракон: когда герой окреп и рядом нет врагов
     const dragon = g.camps.find((c) => c.kind === 'dragon')?.monster;
-    if (dragon && dragon.alive && h.level >= 6 && h.hp / h.maxHp > 0.7 && !this.visibleEnemyHeroes(16, dragon.pos).length) {
-      this.mode = 'dragon';
-      this.target = dragon;
-      this.useAbilities(dragon, ['R', 'Q', 'W', 'E']);
-      return true;
-    }
     if (dragon && dragon.alive && dragon.aggro === h) { this.target = dragon; this.useAbilities(dragon); return true; }
     // свои лагеря (на своей половине карты), потом чужие, если близко
     const own = g.camps.filter((c) => c.monster && c.monster.alive && c.kind !== 'dragon' && Math.sign(c.x) === side(h.team));

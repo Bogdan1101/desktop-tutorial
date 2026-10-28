@@ -71,6 +71,100 @@ test('добивает почти мёртвую цель, вместо того
   check(b.mode === 'fight' && b.target === e, `режим ${b.mode}: цель умрёт раньше, бежать не нужно`);
 });
 
+// --- Натиск после перевеса и добивание нексуса --------------------------------------------------
+
+test('после выигранной драки (двое врагов мертвы) идёт к следующему зданию', () => {
+  const { g, blue, red, place, kill, brainOf, think } = setup();
+  const lira = blue('lira'), b = brainOf(lira);
+  place(lira, 4, 0);
+  kill(red('pyro')); kill(red('grok'));
+  think(b);
+  const tower = g.units.find((u) => u.kind === 'tower' && u.team === 1 && u.order === 0);
+  check(b.mode === 'siege', `режим ${b.mode}, ожидался siege`);
+  check(b.goal && dist(b.goal, tower.pos) < lira.range + tower.radius + 1.5, 'цель — встать в досягаемости внешней башни');
+});
+
+test('при равенстве и без своей волны на башню в одиночку не идёт', () => {
+  const { g, blue, place, brainOf, think } = setup();
+  const lira = blue('lira'), b = brainOf(lira);
+  place(lira, 4, 0);
+  think(b);
+  check(b.mode !== 'siege', `режим ${b.mode}: перевеса нет`);
+});
+
+test('открытый нексус важнее восстановившегося ингибитора', () => {
+  const { g, blue, red, place, kill, brainOf, think } = setup();
+  const lira = blue('lira'), b = brainOf(lira);
+  for (const u of g.units) if (u.team === 1 && (u.kind === 'tower' || u.kind === 'inhib')) { u.everDestroyed = true; if (u.kind === 'tower') u.alive = false; }
+  kill(red('pyro'));
+  place(lira, 42, 2);
+  think(b);
+  const nexus = g.units.find((u) => u.kind === 'nexus' && u.team === 1);
+  check(b.mode === 'siege', `режим ${b.mode}, ожидался siege`);
+  check(b.nextEnemyStructure() === nexus, 'следующая цель — нексус');
+  check(b.goal && dist(b.goal, nexus.pos) <= lira.range + nexus.radius + lira.radius, 'встаёт в досягаемости нексуса');
+});
+
+test('под башней, которая бьёт его, при натиске уходит, если здоровья мало', () => {
+  const { g, blue, red, place, kill, brainOf, think } = setup();
+  const lira = blue('lira'), b = brainOf(lira);
+  const tower = g.units.find((u) => u.kind === 'tower' && u.team === 1 && u.order === 0);
+  kill(red('pyro')); kill(red('grok'));
+  place(lira, tower.pos.x - 6, 0, 0.5);
+  tower.target = lira;
+  think(b);
+  check(b.mode !== 'siege' && b.goal && b.goal.x < lira.pos.x, `режим ${b.mode}: с половиной здоровья под огнём башни надо выйти`);
+});
+
+// --- Дракон -------------------------------------------------------------------------------------
+
+function dragonSetup() {
+  const s = setup();
+  const camp = s.g.camps.find((c) => c.kind === 'dragon');
+  camp.timer = 0;
+  s.g.update(0.01); // появляется дракон
+  for (const h of s.g.allHeroes) { h.pos.x = h.team ? 66 : -66; h.pos.z = (h.slot - 1) * 2; }
+  const grok = s.blue('grok');
+  for (let i = 0; i < 5; i++) grok.gainXp?.(1000);
+  if (grok.level < 6) grok.level = 6;
+  return { ...s, dragon: camp.monster, grok, b: s.brainOf(grok) };
+}
+
+test('лесник с союзником рядом и без видимых врагов идёт на дракона', () => {
+  const { dragon, grok, b, blue, place, think } = dragonSetup();
+  check(b.role === 'jungle', 'grok — лесник синих');
+  place(grok, dragon.pos.x - 6, dragon.pos.z + 4);
+  place(blue('lira'), dragon.pos.x + 4, dragon.pos.z + 10);
+  think(b);
+  check(b.mode === 'dragon' && b.target === dragon, `режим ${b.mode}, ожидался dragon`);
+});
+
+test('союзник рядом с логовом присоединяется к дракону', () => {
+  const { dragon, grok, b, blue, place, brainOf, think } = dragonSetup();
+  place(grok, dragon.pos.x - 4, dragon.pos.z + 3);
+  const lira = blue('lira');
+  place(lira, dragon.pos.x + 4, dragon.pos.z + 12);
+  think(b);
+  const lb = think(brainOf(lira));
+  check(lb.mode === 'dragon', `режим союзника ${lb.mode}, ожидался dragon`);
+});
+
+test('один лесник 6 уровня дракона не начинает', () => {
+  const { dragon, grok, b, place, think } = dragonSetup();
+  place(grok, dragon.pos.x - 6, dragon.pos.z + 4);
+  think(b);
+  check(b.mode !== 'dragon', `режим ${b.mode}: в одиночку дракона не взять`);
+});
+
+test('видимый враг у логова — на дракона не идёт', () => {
+  const { dragon, grok, b, blue, red, place, think } = dragonSetup();
+  place(grok, dragon.pos.x - 6, dragon.pos.z + 4);
+  place(blue('lira'), dragon.pos.x + 4, dragon.pos.z + 10);
+  place(red('pyro'), dragon.pos.x + 9, dragon.pos.z + 6);
+  think(b);
+  check(b.mode !== 'dragon', `режим ${b.mode}: у логова враг`);
+});
+
 // --- Движение и управление игрока ---------------------------------------------------------------
 
 test('два бота лоб в лоб не стоят на месте: обходят друг друга', () => {

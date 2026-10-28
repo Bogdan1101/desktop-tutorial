@@ -11,7 +11,10 @@
     "test:onboarding": "node tests/onboarding.spec.mjs",
     "test:hits": "node tests/hits.spec.mjs",
     "test:projectile": "node tests/projectile.spec.mjs",
-    "test:visibility": "node tests/visibility.spec.mjs"
+    "test:visibility": "node tests/visibility.spec.mjs",
+    "sim": "node tools/sim.mjs",
+    "sim:report": "node tools/sim-report.mjs",
+    "sim:resources": "node --expose-gc tools/sim-resources.mjs"
   },
   "devDependencies": {
     "@capacitor/android": "6.2.2",

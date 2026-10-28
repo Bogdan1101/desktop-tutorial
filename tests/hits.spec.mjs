@@ -226,12 +226,15 @@ test('низкое качество и «меньше движения»: про
 test('низкое качество: фигура есть, искр нет', async (t) => {
   const { page } = t;
   await t.enemyAt(4.5);
-  await page.evaluate(() => { const g = window.dota3.game; g.player.basicAttack(g.heroes[1][0]); });
+  // перехват ставится до выстрела и в том же вызове: иначе снаряд может долететь между вызовами,
+  // отклик появится раньше перехвата, и ожидание не закончится никогда
   const sp = await page.evaluate(() => new Promise((ok) => {
-    const fx = window.dota3.impacts, orig = fx.spawn;
+    const g = window.dota3.game, fx = window.dota3.impacts, orig = fx.spawn;
     fx.spawn = (slot, ...rest) => { const r = orig(slot, ...rest); ok({ kind: slot.kind, ring: slot.shapes.ring.visible, sparks: slot.sparks.some((m) => m.visible) }); return r; };
+    setTimeout(() => ok(null), 10000);
+    g.player.basicAttack(g.heroes[1][0]);
   }));
-  check(sp.kind === 'ember' && sp.ring && !sp.sparks, 'низкое качество', sp);
+  check(sp && sp.kind === 'ember' && sp.ring && !sp.sparks, 'низкое качество (отклика нет за 10 с — null)', sp);
 }, { hero: 'pyro', quality: 'low' });
 
 await run(tests, boot);
